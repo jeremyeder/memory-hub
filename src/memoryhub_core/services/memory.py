@@ -162,6 +162,15 @@ async def create_memory(
         db_content = data.content
         storage_type = "inline"
 
+    # Mark extraction pending before commit so the status is visible immediately
+    node_metadata = data.metadata
+    if (
+        app_settings.entity_extraction_enabled
+        and data.scope != "entity"
+    ):
+        node_metadata = dict(node_metadata or {})
+        node_metadata["extraction_status"] = "pending"
+
     node = MemoryNode(
         id=memory_id,
         content=db_content,
@@ -173,7 +182,7 @@ async def create_memory(
         tenant_id=tenant_id,
         parent_id=data.parent_id,
         branch_type=data.branch_type,
-        metadata_=data.metadata,
+        metadata_=node_metadata,
         domains=data.domains,
         embedding=embedding,
         is_current=True,
@@ -215,6 +224,21 @@ async def create_memory(
                 memory_id,
                 exc_info=True,
             )
+
+    # Trigger async entity extraction after the write is committed (#170 Phase 2)
+    if (
+        app_settings.entity_extraction_enabled
+        and data.scope != "entity"
+    ):
+        from memoryhub_core.services.extraction_runner import trigger_extraction
+
+        await trigger_extraction(
+            memory_id=memory_id,
+            content=data.content,
+            tenant_id=tenant_id,
+            owner_id=data.owner_id,
+            embedding_service=embedding_service,
+        )
 
     memory = node_to_read(node, has_children=has_children, has_rationale=False)
     return memory, curation_result

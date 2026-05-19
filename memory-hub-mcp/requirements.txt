@@ -14,3 +14,4 @@ pydantic-settings
 minio
 psycopg2-binary
 httpx
+spacy>=3.7
