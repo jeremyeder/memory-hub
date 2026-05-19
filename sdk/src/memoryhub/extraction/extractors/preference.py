@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TYPE_CHECKING, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from memoryhub.extraction.base import Extractor
 from memoryhub.extraction.models import CandidateMemory, TraceEvent, TraceEventType
@@ -128,7 +129,8 @@ Return empty array [] if no preferences found.
                 alternative = groups[1].strip() if len(groups) > 1 and groups[1] else None
 
                 # Determine polarity based on pattern
-                if "never" in match.group(0).lower() or "don't" in match.group(0).lower() or "avoid" in match.group(0).lower():
+                matched = match.group(0).lower()
+                if "never" in matched or "don't" in matched or "avoid" in matched:
                     polarity = "negative"
                     content = f"Avoid using {subject}"
                 elif alternative:

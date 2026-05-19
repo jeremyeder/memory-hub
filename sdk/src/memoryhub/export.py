@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from memoryhub.client import MemoryHubClient
@@ -285,7 +285,8 @@ async def export_obsidian(
                 memory_id,
                 project_id=project_id,
             )
-            relationships = rel_result.relationships if hasattr(rel_result, "relationships") else []
+            rels = getattr(rel_result, "relationships", None)
+            relationships = rels if rels is not None else []
         except Exception as exc:
             # Not all memories have relationships, that's okay
             logger.debug("Could not fetch relationships for %s: %s", memory_id, exc)

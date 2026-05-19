@@ -35,6 +35,7 @@ async def _update_extraction_status(
 ) -> None:
     """Update the extraction_status field in a memory's metadata."""
     from sqlalchemy import select
+
     from memoryhub_core.models.memory import MemoryNode
 
     async for session in get_session():

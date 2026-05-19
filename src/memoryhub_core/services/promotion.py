@@ -5,18 +5,15 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from memoryhub_core.models.memory import MemoryNode
 from memoryhub_core.models.schemas import (
     MemoryNodeCreate,
     MemoryNodeRead,
     RelationshipCreate,
 )
 from memoryhub_core.services.embeddings import EmbeddingService
-from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.graph import create_relationship
 from memoryhub_core.services.memory import create_memory, read_memory
 

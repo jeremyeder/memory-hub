@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from memoryhub.extraction.base import Extractor
 from memoryhub.extraction.dedup import DedupFilter

@@ -18,7 +18,6 @@ from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
 from memoryhub_core.models.schemas import MemoryNodeRead, RelationshipCreate, RelationshipRead
 from memoryhub_core.models.utils import generate_stub
 from memoryhub_core.services.embeddings import EmbeddingService
-from memoryhub_core.services.exceptions import MemoryNotFoundError
 from memoryhub_core.services.graph import create_relationship
 from memoryhub_core.services.memory import node_to_read
 
