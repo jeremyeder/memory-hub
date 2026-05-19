@@ -497,9 +497,8 @@ async def _dispatch_remove_member(project_id, opts, ctx):
 
 async def _dispatch_checkpoint(opts, ctx):
     """Dispatch checkpoint action (read or upsert)."""
-    from memoryhub_core.db import get_db_session
+    from src.tools._deps import get_db_session, get_embedding_service, release_db_session
     from memoryhub_core.services.checkpoint import read_checkpoint, upsert_checkpoint
-    from memoryhub_core.services.embeddings import get_embedding_service
     from src.core.auth import require_session
 
     _opt_require("checkpoint", "workflow_name", opts)
@@ -510,40 +509,40 @@ async def _dispatch_checkpoint(opts, ctx):
 
     session_info = require_session(ctx)
 
-    if state is not None:
-        # Upsert: create or update checkpoint
-        async with get_db_session() as db_session:
+    session, gen = await get_db_session()
+    try:
+        if state is not None:
             embedding_service = get_embedding_service()
             memory, created = await upsert_checkpoint(
                 workflow_name=workflow_name,
                 state=state,
-                session=db_session,
+                session=session,
                 embedding_service=embedding_service,
                 tenant_id=session_info.tenant_id,
                 owner_id=session_info.user_id,
                 scope=scope,
                 scope_id=scope_id,
             )
-        return {
-            "workflow_name": workflow_name,
-            "state": memory.metadata,
-            "created": created,
-            "memory_id": str(memory.id),
-        }
+            return {
+                "workflow_name": workflow_name,
+                "state": memory.metadata,
+                "created": created,
+                "memory_id": str(memory.id),
+            }
 
-    # Read: retrieve checkpoint state
-    async with get_db_session() as db_session:
         checkpoint_state = await read_checkpoint(
             workflow_name=workflow_name,
-            session=db_session,
+            session=session,
             tenant_id=session_info.tenant_id,
             owner_id=session_info.user_id,
             scope=scope,
         )
-    return {
-        "workflow_name": workflow_name,
-        "state": checkpoint_state,
-    }
+        return {
+            "workflow_name": workflow_name,
+            "state": checkpoint_state,
+        }
+    finally:
+        await release_db_session(gen)
 
 
 async def _dispatch_promote(memory_id, project_id, opts, ctx):
