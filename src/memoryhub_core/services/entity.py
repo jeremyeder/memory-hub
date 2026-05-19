@@ -4,6 +4,7 @@ Provides deduplication, aliasing, and entity-memory linking for Phase 2 entity
 extraction (#170). All functions are async and accept an explicit AsyncSession.
 """
 
+import hashlib
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -31,6 +32,16 @@ VALID_ENTITY_TYPES = frozenset({
 # Similarity threshold for entity deduplication via vector search.
 # Cosine distance < 0.08 (similarity > 0.92) is considered a match.
 ENTITY_DEDUP_THRESHOLD = 0.08
+
+
+def compute_entity_hash(tenant_id: str, owner_id: str, name: str, entity_type: str) -> str:
+    """Compute deterministic hash for entity deduplication.
+
+    Hash is based on tenant_id:owner_id:normalized_name:entity_type.
+    Names are lowercased and stripped to ensure case-insensitive matching.
+    """
+    key = f"{tenant_id}:{owner_id}:{name.lower().strip()}:{entity_type}"
+    return hashlib.sha256(key.encode()).hexdigest()
 
 
 async def find_or_create_entity(
@@ -67,18 +78,15 @@ async def find_or_create_entity(
     if not normalized_name:
         raise ValueError("Entity name cannot be empty")
 
-    # Step 1: Exact match on canonical name (case-insensitive)
+    # Compute the content hash for deduplication
+    entity_hash = compute_entity_hash(tenant_id, owner_id, normalized_name, entity_type)
+
+    # Step 1: Hash-based exact match (fast, indexed)
     exact_stmt = select(MemoryNode).where(
+        MemoryNode.content_hash == entity_hash,
         MemoryNode.scope == "entity",
-        MemoryNode.tenant_id == tenant_id,
-        MemoryNode.owner_id == owner_id,
         MemoryNode.deleted_at.is_(None),
-        MemoryNode.is_current.is_(True),
-    )
-    # SQLAlchemy func.lower for portable case-insensitive comparison
-    from sqlalchemy import func
-    exact_stmt = exact_stmt.where(func.lower(MemoryNode.content) == normalized_name.lower())
-    exact_stmt = exact_stmt.limit(1)
+    ).limit(1)
     result = await session.execute(exact_stmt)
     existing = result.scalar_one_or_none()
 
@@ -180,13 +188,34 @@ async def find_or_create_entity(
         version=1,
         storage_type="inline",
         content_ref=None,
+        content_hash=entity_hash,
         created_at=now,
         updated_at=now,
     )
 
     session.add(node)
-    await session.commit()
-    await session.refresh(node)
+
+    try:
+        await session.commit()
+        await session.refresh(node)
+    except IntegrityError:
+        # Race condition — another task created the same entity between our
+        # check and our insert. Rollback and re-query by hash.
+        await session.rollback()
+        retry_stmt = select(MemoryNode).where(
+            MemoryNode.content_hash == entity_hash,
+            MemoryNode.scope == "entity",
+            MemoryNode.deleted_at.is_(None),
+        ).limit(1)
+        retry_result = await session.execute(retry_stmt)
+        retry_node = retry_result.scalar_one_or_none()
+
+        if retry_node is not None:
+            entity_read = node_to_read(retry_node, has_children=False, has_rationale=False)
+            return entity_read, False
+
+        # Entity still doesn't exist after race — re-raise
+        raise
 
     entity_read = node_to_read(node, has_children=False, has_rationale=False)
     return entity_read, True
