@@ -560,7 +560,7 @@ async def _dispatch_promote(memory_id, project_id, opts, ctx):
     _require("promote", "memory_id", memory_id)
     _opt_require("promote", "target_scope", opts)
 
-    claims = get_claims_from_context(ctx)
+    claims = get_claims_from_context()
     tenant_id = get_tenant_filter(claims)
     promoted_by = claims["sub"]
 
