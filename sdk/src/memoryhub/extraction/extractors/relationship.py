@@ -80,17 +80,18 @@ class RelationshipExtractor(Extractor):
             related_ids = []
             very_high_match = None
 
-            for result in search_results:
+            for memory in search_results.results:
                 # Skip if below relevance threshold
-                if result.get("relevance_score", 0) < self.relevance_threshold:
+                relevance = memory.relevance_score or 0.0
+                if relevance < self.relevance_threshold:
                     continue
 
-                memory_id = result.get("id")
+                memory_id = memory.id
                 if not memory_id:
                     continue
 
                 # Track very high relevance matches for parent assignment
-                if result.get("relevance_score", 0) > 0.85:
+                if relevance > 0.85:
                     if very_high_match is None:
                         very_high_match = memory_id
 
