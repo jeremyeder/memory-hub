@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cluster-health-check.sh — verify deployment state at session start
 #
-# Usage: scripts/cluster-health-check.sh [--full]
+# Usage: scripts/cluster-health-check.sh [--full] [--context <name>]
 #
 # Runs a quick health check on the MemoryHub cluster deployment. Designed
 # to catch stale assumptions about deployment state (migration drift, dead
@@ -25,14 +25,18 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # ── Args ────────────────────────────────────────────────────────────────────
 
 FULL=false
+CTX="mcp-rhoai"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --full) FULL=true; shift ;;
+        --context) CTX="$2"; shift 2 ;;
+        --context=*) CTX="${1#*=}"; shift ;;
         -h|--help)
-            echo "Usage: $0 [--full]"
+            echo "Usage: $0 [--full] [--context <name>]"
             echo ""
             echo "Quick health check on MemoryHub cluster deployment."
-            echo "  --full    Also check DB migration state (needs port-forward)"
+            echo "  --full              Also check DB migration state (needs port-forward)"
+            echo "  --context <name>    Kubernetes context to use (default: mcp-rhoai)"
             exit 0
             ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
@@ -66,8 +70,8 @@ if ! command -v oc &>/dev/null; then
     exit 1
 fi
 
-if ! OC_USER=$(oc whoami 2>/dev/null); then
-    bad "login:" "not logged in"
+if ! OC_USER=$(oc whoami --context "$CTX" 2>/dev/null); then
+    bad "login:" "not logged in (context: $CTX)"
     echo ""
     if [[ -f "$PROJECT_ROOT/.env" ]] && grep -q OC_SERVER "$PROJECT_ROOT/.env"; then
         echo "  Log in with: source .env && oc login \"\$OC_SERVER\" -u \"\$OC_USER\" -p \"\$OC_PASSWORD\" --insecure-skip-tls-verify"
@@ -77,15 +81,15 @@ if ! OC_USER=$(oc whoami 2>/dev/null); then
     exit 1
 fi
 
-OC_SERVER=$(oc whoami --show-server 2>/dev/null || echo "unknown")
-ok "login:" "${OC_USER} @ ${OC_SERVER}"
+OC_SERVER=$(oc whoami --show-server --context "$CTX" 2>/dev/null || echo "unknown")
+ok "login:" "${OC_USER} @ ${OC_SERVER} (ctx: ${CTX})"
 
 # ── Check 2: MCP pod status ────────────────────────────────────────────────
 
 NAMESPACE="memory-hub-mcp"
 DEPLOYMENT="memory-hub-mcp"
 
-POD_JSON=$(oc get pods -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT" \
+POD_JSON=$(oc get pods --context "$CTX" -n "$NAMESPACE" -l "app.kubernetes.io/name=$DEPLOYMENT" \
     -o json 2>/dev/null || echo '{"items":[]}')
 
 POD_COUNT=$(echo "$POD_JSON" | python3 -c "
@@ -136,12 +140,12 @@ fi
 # ── Check 3: DB pod status ─────────────────────────────────────────────────
 
 DB_NAMESPACE="memoryhub-db"
-DB_POD_PHASE=$(oc get pods -n "$DB_NAMESPACE" -l app=memoryhub-pg \
+DB_POD_PHASE=$(oc get pods --context "$CTX" -n "$DB_NAMESPACE" -l app=memoryhub-pg \
     -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "")
 
 if [[ -z "$DB_POD_PHASE" ]]; then
     # Try without label selector
-    DB_POD_PHASE=$(oc get pods -n "$DB_NAMESPACE" --no-headers 2>/dev/null \
+    DB_POD_PHASE=$(oc get pods --context "$CTX" -n "$DB_NAMESPACE" --no-headers 2>/dev/null \
         | grep -i "pg\|postgres" | awk '{print $3}' | head -1 || echo "")
 fi
 
@@ -163,13 +167,13 @@ if [[ "$POD_COUNT" -ge 1 ]]; then
     # We care about: SQL errors, import failures, tracebacks, crash signals.
     ERROR_PATTERN="(ProgrammingError|ImportError|ModuleNotFoundError|undefined.column|Traceback|CRITICAL|OOMKilled|CrashLoopBack)"
 
-    RECENT_ERRORS=$(oc logs "deployment/$DEPLOYMENT" -n "$NAMESPACE" --tail=100 2>/dev/null \
-        | grep -c -E "$ERROR_PATTERN" || echo "0")
+    RECENT_ERRORS=$(oc logs --context "$CTX" "deployment/$DEPLOYMENT" -n "$NAMESPACE" --tail=100 2>/dev/null \
+        | { grep -c -E "$ERROR_PATTERN" || true; })
 
     if [[ "$RECENT_ERRORS" == "0" ]]; then
         ok "pod errors:" "none in last 100 log lines"
     else
-        ERROR_SAMPLE=$(oc logs "deployment/$DEPLOYMENT" -n "$NAMESPACE" --tail=100 2>/dev/null \
+        ERROR_SAMPLE=$(oc logs --context "$CTX" "deployment/$DEPLOYMENT" -n "$NAMESPACE" --tail=100 2>/dev/null \
             | grep -E "$ERROR_PATTERN" | tail -1 \
             | head -c 120 || echo "")
         warn "pod errors:" "${RECENT_ERRORS} error lines in last 100 log lines"
@@ -184,7 +188,7 @@ fi
 
 # ── Check 5: Route ─────────────────────────────────────────────────────────
 
-ROUTE=$(oc get route "$DEPLOYMENT" -n "$NAMESPACE" \
+ROUTE=$(oc get route --context "$CTX" "$DEPLOYMENT" -n "$NAMESPACE" \
     -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
 
 if [[ -n "$ROUTE" ]]; then
@@ -206,7 +210,7 @@ fi
 
 DEPLOYED_TOOLS=""
 if [[ "$POD_COUNT" -ge 1 ]]; then
-    DEPLOYED_TOOLS=$(oc logs "deployment/$DEPLOYMENT" -n "$NAMESPACE" --tail=50 2>/dev/null \
+    DEPLOYED_TOOLS=$(oc logs --context "$CTX" "deployment/$DEPLOYMENT" -n "$NAMESPACE" --tail=50 2>/dev/null \
         | grep -oE "tools['\"]?: *[0-9]+" | grep -oE '[0-9]+' | head -1 || echo "")
 fi
 
@@ -227,7 +231,7 @@ fi
 # Check how old the deployed image is
 
 if [[ "$POD_COUNT" -ge 1 ]]; then
-    POD_CREATED=$(oc get pod -l "app.kubernetes.io/name=$DEPLOYMENT" -n "$NAMESPACE" \
+    POD_CREATED=$(oc get pod --context "$CTX" -l "app.kubernetes.io/name=$DEPLOYMENT" -n "$NAMESPACE" \
         -o jsonpath='{.items[0].metadata.creationTimestamp}' 2>/dev/null || echo "")
 
     if [[ -n "$POD_CREATED" ]]; then
@@ -263,7 +267,7 @@ fi
 # Pre-emptive of #221 (template drift); upgrade to a hard diff against
 # users-configmap.example.yaml once that issue lands.
 
-USERS_JSON=$(oc get configmap memoryhub-users -n "$NAMESPACE" \
+USERS_JSON=$(oc get configmap --context "$CTX" memoryhub-users -n "$NAMESPACE" \
     -o jsonpath='{.data.users\.json}' 2>/dev/null || echo "")
 
 if [[ -n "$USERS_JSON" ]]; then
@@ -305,7 +309,7 @@ if [[ "$FULL" == "true" ]]; then
     # Find an available local port
     LOCAL_PORT=15432
 
-    oc port-forward svc/memoryhub-pg "$LOCAL_PORT":5432 -n "$DB_NAMESPACE" &>/dev/null &
+    oc port-forward --context "$CTX" svc/memoryhub-pg "$LOCAL_PORT":5432 -n "$DB_NAMESPACE" &>/dev/null &
     PF_PID=$!
     sleep 2
 
