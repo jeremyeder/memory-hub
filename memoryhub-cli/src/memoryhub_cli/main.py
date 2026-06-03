@@ -23,7 +23,7 @@ from memoryhub.exceptions import (
 from rich.table import Table
 
 from memoryhub_cli.admin import admin_app
-from memoryhub_cli.config import get_connection_params, save_config
+from memoryhub_cli.config import get_api_key, get_connection_params, get_server_url, save_config
 from memoryhub_cli.export import export_app
 from memoryhub_cli.output import (
     EXIT_AUTH_ERROR,
@@ -108,8 +108,25 @@ app.add_typer(session_app, name="session")
 
 
 def _get_client(output: OutputFormat = OutputFormat.table):
-    """Create a MemoryHubClient from config/env."""
+    """Create a MemoryHubClient from config/env.
+
+    Tries API key auth first (env var, key file, or config). Falls back to
+    OAuth if no API key is available.
+    """
     from memoryhub import MemoryHubClient
+
+    api_key = get_api_key()
+    if api_key:
+        url = get_server_url()
+        if not url:
+            handle_error(
+                "missing_config",
+                "API key found but no server URL. "
+                "Set MEMORYHUB_URL or run 'memoryhub login'.",
+                output,
+                EXIT_CLIENT_ERROR,
+            )
+        return MemoryHubClient(url=url, api_key=api_key)
 
     params = get_connection_params()
     missing = [k for k, v in params.items() if not v]
@@ -147,6 +164,17 @@ def _get_project_id_default() -> str | None:
     except Exception:
         pass
     return None
+
+
+def _print_compact(memories, project_id: str | None = None) -> None:
+    """Print memories as content-only text for LLM context injection."""
+    attr = f' project="{project_id}"' if project_id else ""
+    print(f"<memoryhub-context{attr}>")
+    for mem in memories:
+        content = mem.content or mem.stub or ""
+        for line in content.splitlines():
+            print(f"- {line}")
+    print("</memoryhub-context>")
 
 
 def _run(coro):
@@ -259,6 +287,9 @@ def search(
         return
     if output == OutputFormat.quiet:
         return
+    if output == OutputFormat.compact:
+        _print_compact(result.results, _project_id)
+        return
 
     if not result.results:
         console.print("[dim]No results found.[/dim]")
@@ -286,6 +317,71 @@ def search(
     console.print(
         f"[dim]{len(result.results)} of {result.total_matching} matching{more}[/dim]"
     )
+
+
+@app.command("list")
+def list_memories(
+    scope: str | None = typer.Option(None, "--scope", "-s", help="Filter by scope"),
+    max_results: int = typer.Option(20, "--max", "-n", help="Maximum results"),
+    project_id: str | None = typer.Option(
+        None, "--project-id", "-p", help="Project ID",
+    ),
+    content_type: str | None = typer.Option(
+        None, "--content-type", help="Filter by content type: declarative or behavioral",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet, compact",
+    ),
+):
+    """List memories ordered by creation time (no semantic search)."""
+    client = _get_client(output)
+    _project_id = project_id or _get_project_id_default()
+
+    async def _do():
+        async with client:
+            return await client.list(
+                scope=scope, max_results=max_results,
+                project_id=_project_id, content_type=content_type,
+            )
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    memories = result.get("memories", [])
+    if output == OutputFormat.compact:
+        # Build lightweight objects with .content/.stub for _print_compact
+        from types import SimpleNamespace
+        mems = [SimpleNamespace(**m) for m in memories]
+        _print_compact(mems, _project_id)
+        return
+
+    if not memories:
+        console.print("[dim]No memories found.[/dim]")
+        return
+
+    table = Table(title="Memories")
+    table.add_column("ID", style="dim", max_width=12)
+    table.add_column("Scope", style="cyan")
+    table.add_column("Weight", justify="right")
+    table.add_column("Stub", max_width=60)
+
+    for mem in memories:
+        table.add_row(
+            str(mem.get("id", ""))[:12],
+            mem.get("scope", ""),
+            f"{mem.get('weight', 0):.2f}",
+            (mem.get("stub") or mem.get("content", ""))[:60],
+        )
+
+    console.print(table)
+    cursor = result.get("cursor")
+    if cursor:
+        console.print("[dim]More available. Use --cursor to paginate.[/dim]")
 
 
 @app.command()

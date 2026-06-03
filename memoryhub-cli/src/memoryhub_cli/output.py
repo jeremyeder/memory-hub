@@ -29,6 +29,7 @@ class OutputFormat(str, Enum):
     table = "table"
     json = "json"
     quiet = "quiet"
+    compact = "compact"
 
 
 # ── Exit codes ────────────────────────────────────────────────────────────────

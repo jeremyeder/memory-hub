@@ -1,10 +1,14 @@
 """Configuration management for MemoryHub CLI."""
 
+from __future__ import annotations
+
 import json
+import os
 from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "memoryhub"
 CONFIG_FILE = CONFIG_DIR / "config.json"
+API_KEY_FILE = CONFIG_DIR / "api-key"
 
 
 def load_config() -> dict:
@@ -18,18 +22,40 @@ def save_config(config: dict) -> None:
     """Save config to disk."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(json.dumps(config, indent=2) + "\n")
-    # Restrict permissions — contains secrets
     CONFIG_FILE.chmod(0o600)
 
 
+def get_api_key() -> str | None:
+    """Resolve API key from env var, key file, or config.
+
+    Precedence: MEMORYHUB_API_KEY env var > ~/.config/memoryhub/api-key file
+    > api_key in config.json.
+    """
+    key = os.environ.get("MEMORYHUB_API_KEY", "").strip()
+    if key:
+        return key
+
+    if API_KEY_FILE.exists():
+        key = API_KEY_FILE.read_text().strip()
+        if key:
+            return key
+
+    return load_config().get("api_key") or None
+
+
+def get_server_url() -> str | None:
+    """Resolve server URL from env var or config."""
+    url = os.environ.get("MEMORYHUB_URL", "").strip()
+    if url:
+        return url
+    return load_config().get("url") or None
+
+
 def get_connection_params() -> dict:
-    """Get connection parameters, preferring env vars over config file.
+    """Get OAuth connection parameters, preferring env vars over config file.
 
     Required keys: url, auth_url, client_id, client_secret.
-    Env vars: MEMORYHUB_URL, MEMORYHUB_AUTH_URL, MEMORYHUB_CLIENT_ID, MEMORYHUB_CLIENT_SECRET.
     """
-    import os
-
     config = load_config()
     return {
         "url": os.environ.get("MEMORYHUB_URL", config.get("url", "")),
