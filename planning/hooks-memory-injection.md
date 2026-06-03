@@ -1,6 +1,6 @@
 # Zero-Overhead Memory Injection via Agent Hooks
 
-**Status:** Proposal
+**Status:** Phase 2 shipped (hook integration)
 **Date:** June 2026
 **Related issues:** #255, #256, #246, #203
 

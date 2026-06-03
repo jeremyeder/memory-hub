@@ -352,7 +352,7 @@ def list_memories(
     if output == OutputFormat.quiet:
         return
 
-    memories = result.get("memories", [])
+    memories = result.get("results", [])
     if output == OutputFormat.compact:
         # Build lightweight objects with .content/.stub for _print_compact
         from types import SimpleNamespace

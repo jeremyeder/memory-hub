@@ -9,15 +9,16 @@ file. Do not hand-edit this file directly — your changes will be overwritten.
 
 ## At session start
 
-Read your API key from `~/.config/memoryhub/api-key` (trim whitespace)
-and call `register_session(api_key="<key>")` to authenticate. Do NOT
-call `search_memory` yet.
+Check for a `<memoryhub-context>` block in your conversation context.
+If present, the SessionStart hook has pre-loaded project and user
+memories -- use them as your working set. Do NOT call `register_session`
+or `search_memory` yet.
 
-## After the first user turn
-
-Derive a 1-2 sentence summary of the user's intent from the opening
-message. Call `search_memory(query=<summary>)`. Use the returned memories
-as your working set for the session.
+If no `<memoryhub-context>` block is present (hook not configured or
+failed silently), fall back to the manual flow: read your API key from
+`~/.config/memoryhub/api-key` (trim whitespace), call
+`register_session(api_key="<key>")`, then after the first user turn
+derive a 1-2 sentence summary and call `search_memory(query=<summary>)`.
 
 ## During the session — watch for pivots
 

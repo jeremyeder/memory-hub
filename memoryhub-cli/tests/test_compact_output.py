@@ -57,6 +57,20 @@ class TestPrintCompact:
         assert "- line one" in out
         assert "- line two" in out
 
+    def test_list_result_key(self):
+        """The list command parses 'results' from the API response, not 'memories'."""
+        api_response = {
+            "results": [
+                {"content": "memory from list", "stub": None},
+            ],
+            "count": 1,
+            "has_more": False,
+        }
+        memories = api_response.get("results", [])
+        mems = [SimpleNamespace(**m) for m in memories]
+        out = _capture_compact(mems, "test-project")
+        assert "- memory from list" in out
+
     def test_no_metadata_in_output(self):
         mems = [SimpleNamespace(
             content="the memory text",
