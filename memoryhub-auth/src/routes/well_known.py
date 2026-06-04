@@ -19,6 +19,7 @@ async def oauth_server_metadata(request: Request):
             "client_credentials",
             "refresh_token",
             "authorization_code",
+            "urn:ietf:params:oauth:grant-type:token-exchange",
         ],
         "response_types_supported": ["code"],
         "code_challenge_methods_supported": ["S256"],

@@ -12,6 +12,12 @@ from src.config import settings
 from src.database import get_session
 from src.errors import OAuthError
 from src.models import AuthSession, OAuthClient, RefreshToken
+from src.token_exchange import (
+    lookup_exchange_client,
+    parse_service_account,
+    resolve_tenant,
+    validate_subject_token,
+)
 from src.tokens import create_access_token, create_refresh_token
 
 log = logging.getLogger("memoryhub-auth.routes.token")
@@ -89,6 +95,8 @@ async def token_endpoint(
     code: str = Form(default=None),
     redirect_uri: str = Form(default=None),
     code_verifier: str = Form(default=None),
+    subject_token: str = Form(default=None),
+    subject_token_type: str = Form(default=None),
     session: AsyncSession = Depends(get_session),
 ):
     """OAuth 2.1 token endpoint."""
@@ -105,12 +113,17 @@ async def token_endpoint(
         return await _handle_authorization_code(
             client_id, client_secret, code, redirect_uri, code_verifier, session
         )
+    elif grant_type == "urn:ietf:params:oauth:grant-type:token-exchange":
+        return await _handle_token_exchange(
+            client_id, subject_token, subject_token_type, scope, session
+        )
     else:
         raise OAuthError(
             400,
             "unsupported_grant_type",
             f"Grant type '{grant_type}' is not supported. "
-            "Supported: client_credentials, refresh_token, authorization_code",
+            "Supported: client_credentials, refresh_token, "
+            "authorization_code, urn:ietf:params:oauth:grant-type:token-exchange",
         )
 
 
@@ -318,5 +331,59 @@ async def _handle_authorization_code(
         "token_type": "bearer",
         "expires_in": settings.access_token_ttl,
         "refresh_token": raw_refresh,
+        "scope": " ".join(scopes),
+    }
+
+
+async def _handle_token_exchange(
+    client_id: str | None,
+    subject_token: str | None,
+    subject_token_type: str | None,
+    scope: str | None,
+    session: AsyncSession,
+) -> dict:
+    if not settings.token_exchange_enabled:
+        raise OAuthError(
+            400,
+            "unsupported_grant_type",
+            "Token exchange is not enabled in this deployment",
+        )
+    if not client_id:
+        raise OAuthError(400, "invalid_request", "client_id is required")
+    if not subject_token:
+        raise OAuthError(400, "invalid_request", "subject_token is required")
+
+    if subject_token_type and subject_token_type != "urn:ietf:params:oauth:token-type:jwt":
+        raise OAuthError(
+            400,
+            "invalid_request",
+            f"Unsupported subject_token_type: {subject_token_type}",
+        )
+
+    token_info = await validate_subject_token(subject_token)
+    namespace, sa_name = parse_service_account(token_info["username"])
+    tenant_id = await resolve_tenant(namespace)
+
+    client = await lookup_exchange_client(client_id, session)
+    scopes = _resolve_scopes(scope, client)
+
+    subject = token_info["username"]
+    access_token = create_access_token(
+        subject=subject,
+        identity_type=client.identity_type,
+        tenant_id=tenant_id,
+        scopes=scopes,
+    )
+
+    log.info(
+        "Token exchange: sa=%s namespace=%s tenant=%s client=%s",
+        sa_name, namespace, tenant_id, client_id,
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "expires_in": settings.access_token_ttl,
+        "issued_token_type": "urn:ietf:params:oauth:token-type:access_token",
         "scope": " ".join(scopes),
     }

@@ -120,6 +120,17 @@ else
     echo "  Ask a cluster-admin to run: oc apply -f deploy/oauthclient.yaml"
 fi
 
+# Cluster-scoped RBAC (for token exchange / TokenReview)
+echo "→ Checking RBAC for token exchange..."
+if oc auth can-i create clusterrolebindings --context "$CONTEXT" 2>/dev/null; then
+    echo "  ClusterRoleBindings will be applied with the manifest."
+else
+    echo "  Warning: No permission to create ClusterRoleBindings."
+    echo "  Token exchange requires cluster-scoped RBAC."
+    echo "  Ask a cluster-admin to run:"
+    echo "    oc apply -f openshift.yaml  (for ServiceAccount, ClusterRole, ClusterRoleBindings)"
+fi
+
 # Run Alembic migrations before deploying new code
 echo "→ Running database migrations..."
 DB_NAMESPACE="memoryhub-db"

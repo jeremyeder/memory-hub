@@ -55,6 +55,46 @@ metadata:
   annotations:
     service.beta.openshift.io/inject-cabundle: "true"
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: auth-server
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: memoryhub-auth-ns-reader
+rules:
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: memoryhub-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+- kind: ServiceAccount
+  name: auth-server
+  namespace: memoryhub-auth
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: memoryhub-auth-ns-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: memoryhub-auth-ns-reader
+subjects:
+- kind: ServiceAccount
+  name: auth-server
+  namespace: memoryhub-auth
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -71,6 +111,7 @@ spec:
       annotations:
         alpha.image.policy.openshift.io/resolve-names: '*'
     spec:
+      serviceAccountName: auth-server
       initContainers:
       - name: combine-ca
         image: registry.access.redhat.com/ubi9/ubi-minimal:latest

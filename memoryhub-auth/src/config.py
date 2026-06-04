@@ -49,6 +49,13 @@ class AuthSettings(BaseSettings):
     default_tenant_id: str = "default"
     default_human_scopes: list[str] = ["memory:read:user", "memory:write:user"]
 
+    # Kubernetes API (for token exchange / TokenReview)
+    k8s_api_server: str = "https://kubernetes.default.svc"
+    k8s_token_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    k8s_ca_path: str = "/etc/pki/combined-ca/ca-bundle.crt"
+    token_exchange_enabled: bool = True
+    tenant_cache_ttl: int = 300  # 5 minutes
+
     # Session TTLs
     auth_session_pending_ttl: int = 300  # 5 minutes
     auth_session_ready_ttl: int = 600  # 10 minutes
