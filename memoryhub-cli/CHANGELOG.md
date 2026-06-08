@@ -2,11 +2,17 @@
 
 All notable changes to the `memoryhub-cli` package.
 
+## [0.9.0] — 2026-06-08
+
+- **CLI/SDK parity (#257)**: `memoryhub promote`, `memoryhub graduate`,
+  `memoryhub checkpoint`, and `memoryhub project describe` complete
+  feature parity with the MCP server.
+- **Fix**: Search command `--output` help text now lists `compact` format.
+- **Skill**: Added `memoryhub-manage` Claude Code skill for cold-path
+  operations (#203 prototype).
+
 ## [0.8.0] — 2026-06-03
 
-- **New commands (#256)**: `memoryhub promote`, `memoryhub graduate`,
-  `memoryhub checkpoint`, and `memoryhub describe` for memory lifecycle
-  management.
 - **Obsidian export (#245)**: `memoryhub export --format obsidian` generates
   Obsidian-compatible markdown with wikilinks and frontmatter.
 - **Hook-aware rule templates**: `memoryhub config init` and

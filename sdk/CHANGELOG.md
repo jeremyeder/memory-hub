@@ -2,10 +2,14 @@
 
 All notable changes to the `memoryhub` SDK package.
 
+## [0.12.0] — 2026-06-08
+
+- **`describe_project()` method (#257)**: Retrieve project details
+  including members, memory counts, and description.
+
 ## [0.11.0] — 2026-06-03
 
-- **`describe_project()` method**: Retrieve project details including
-  members, memory counts, and description.
+- **Lint cleanup**: Fixed ruff findings (unused imports, import sorting).
 
 ## [0.10.0] — 2026-05-28
 
