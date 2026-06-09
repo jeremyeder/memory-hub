@@ -70,16 +70,64 @@ For `SessionStart`, the available matchers are:
 | `clear` | `/clear` command | Yes | Conversation wiped, same as fresh start |
 | `resume` | `--resume`, `--continue`, `/resume` | No | Prior memories still in transcript |
 
-The hook system is extensible. Projects can add hooks for other lifecycle
-events (e.g., an `OnAuthenticate` hook that registers the MemoryHub session
-when MCP auth completes, or a `PostToolUse` hook that auto-saves decisions
-after certain tool calls). The `load-memories.sh` script is the foundation;
-the settings.json wiring determines when it fires.
+### Scope boundary: memory-hub vs agent template
 
-### Why command hooks, not MCP tool hooks
+Memory-hub provides the **service-side primitives** that agent hooks call:
+the CLI, the SDK, and reference hook scripts. It does not own the agent-side
+hook infrastructure -- that belongs to the agent template (fips-agents).
 
-The docs state that MCP tool hooks on SessionStart "typically fire before servers
-finish connecting." A command hook calling the CLI is reliable.
+What memory-hub provides:
+
+1. **CLI commands** -- search, write, list, checkpoint, etc. The stable
+   interface that hook scripts call.
+2. **Reference hook scripts** -- `.claude/hooks/load-memories.sh` and
+   similar, demonstrating the pattern for each memory-relevant lifecycle
+   event.
+3. **Config wizard** -- `memoryhub config init` generates settings.json
+   hook wiring for the chosen memory access profile.
+
+The agent template owns the full hook lifecycle (all hook types, matcher
+conventions, hook composition patterns). Memory-hub hooks into the subset
+of lifecycle events where memory access matters.
+
+### Transport: CLI via bash
+
+Hook scripts call the MemoryHub CLI binary. This is a deliberate choice
+over alternatives:
+
+| Transport | Startup | Auth handling | Maintenance | Verdict |
+|-----------|---------|---------------|-------------|---------|
+| CLI (`memoryhub search ...`) | ~0.5s Python import | Encapsulated (env var, file, config) | Hook script doesn't change when API evolves | **Use this** |
+| curl to REST API | Near-zero | Must duplicate in bash | Breaks on API changes | Too fragile |
+| `python3 -c` with SDK | ~0.5s Python import | Encapsulated, but no stable CLI interface | Worse CLI | No benefit |
+| MCP tool hook | N/A | N/A | Servers not reliably connected at SessionStart | Not viable for startup |
+
+The CLI is a stable abstraction layer. Auth resolution, server URL lookup,
+output formatting, and API shape changes are all encapsulated -- the hook
+script stays the same. Current round-trip is ~2.1s, well within the 5s
+timeout. A compiled CLI (Rust/Go) is the Phase 5 optimization if Python
+startup becomes a bottleneck.
+
+For non-Claude-Code agents (fips-agents, custom frameworks), the SDK is the
+right path -- Tier 1 in section 2. The CLI path is for Tier 2 scenarios
+where you don't control prompt assembly but do have shell hook access.
+
+### Memory-relevant hook types
+
+Not all agent lifecycle hooks need memory access. The ones that do:
+
+| Hook type | Memory operation | Example |
+|-----------|-----------------|---------|
+| SessionStart (startup, compact, clear) | Read: inject context | `memoryhub search --output compact` |
+| PostCompact | Read: re-inject after compression | Same script as SessionStart |
+| SessionEnd | Write: save learnings | `memoryhub write "..." --scope project` |
+| SubagentStart | Read: scoped injection for sub-agent | `memoryhub search --scope project` |
+
+Other hook types (PreToolUse, PostToolUse, UserPromptSubmit, etc.) are
+agent-template concerns. A project *could* wire MemoryHub into those
+(e.g., a PostToolUse hook that checkpoints state after deploys), but
+that's project-specific customization, not something memory-hub ships
+by default.
 
 ### Authentication
 
