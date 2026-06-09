@@ -432,7 +432,7 @@ Tested 2026-06-09 on the mcp-rhoai cluster with three memories of varying entity
 
 ## Open Questions
 
-1. **Extraction trigger for existing memories**: Phase 2 extraction runs at write time going forward. Do we backfill entity extraction for the existing memory corpus? Backfill could be done as a background migration task, but it will make a large number of LLM calls. Define scope and cost estimate before enabling `ENTITY_EXTRACTION_ENABLED=true` in production.
+1. ~~**Extraction trigger for existing memories**~~: **Resolved (#250, 2026-06-09).** Backfill ran as a K8s Job (`scripts/backfill-job.yaml`) with the full 3-stage cascade at concurrency 2 against GPT-OSS 20B. 140 memories processed, 837 entities extracted, 0 failures, 12 minutes wall time. Script at `scripts/backfill-entities.py`; also available as `memory(action="backfill_entities")` MCP admin action for future use.
 
 2. ~~**Entity ownership and scope**~~: **Resolved (PR #244).** Option (a): per-owner deduplication. Entity nodes inherit `owner_id` from the source memory. `find_or_create_entity` scopes its exact-match and vector-similarity queries by `(tenant_id, owner_id)`. Cross-user deduplication deferred until RBAC implications are fully designed.
 
