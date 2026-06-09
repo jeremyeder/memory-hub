@@ -395,6 +395,44 @@ Deployment order: migrate first, deploy new code second. Phase 1 search enhancem
 - Any consumer that calls `search_memories_with_focus` directly — no interface break.
 - Phase 3 backend decision: depends on observability data from Phase 1 and 2 production runs.
 
+## Stage 3 Implementation Notes (PR #266, 2026-06-09)
+
+### What shipped
+
+Stage 3 adds an LLM-based fallback extractor to the cascade. When Stages 1 (spaCy) and 2 (GLiNER2) combined produce fewer than 2 high-confidence entities, Stage 3 calls a configured vLLM endpoint with a structured extraction prompt. It is the only stage that extracts inter-entity relationships (not just memory-to-entity MENTIONS edges).
+
+Configuration: `MEMORYHUB_LLM_EXTRACTION_URL` and `MEMORYHUB_LLM_EXTRACTION_MODEL`. When URL is empty, Stage 3 is disabled. Currently pointed at GPT-OSS 20B (`RedHatAI/gpt-oss-20b`) via cluster-internal service DNS.
+
+Inter-entity relationships use the existing `related_to` edge type. The LLM's specific label (e.g., `uses`, `part_of`, `created_by`) is stored in `metadata["llm_relationship_type"]`. This avoids schema changes while preserving the LLM's richer relationship vocabulary.
+
+### Resilience
+
+Adapted from the CDC data-acceptance-testing pipeline (which made GPT-OSS 20B work reliably in batch):
+
+- **Best-effort JSON parsing**: direct parse, strip code fences, regex extraction. Handles the model occasionally wrapping JSON in markdown fences or embedding it in prose.
+- **Pydantic schema validation** via `_ExtractionResult` model. Validates entity types against POLE+O vocabulary and confidence ranges. Invalid entity types are silently dropped (not rejected), so one bad entity doesn't invalidate the whole response.
+- **Retry with correction**: on format or validation failure, the bad response is injected back into the conversation with a correction message explaining what went wrong. GPT-OSS 20B responds well to seeing its own mistake. Up to 3 retries with exponential backoff (1s, 2s, 4s).
+- **Service error retry**: transient HTTP errors (429, 502, 503, 504) get separate exponential backoff (2s, 4s, max 2 retries). Non-retryable errors (400) fail immediately.
+
+KFP pipelines were considered but rejected for the per-write path. The extraction runner's existing semaphore-bounded concurrency pool is sufficient. KFP is appropriate for the corpus backfill scenario (open question #1) if that gets filed.
+
+### Live testing observations
+
+Tested 2026-06-09 on the mcp-rhoai cluster with three memories of varying entity density:
+
+1. **"Alice Johnson presented the Q3 roadmap at the all-hands meeting in Austin"** -- spaCy extracted Alice Johnson (person) and Austin (location). Stage 1 sufficient, no cascade.
+
+2. **"Deployed PostgreSQL 16 with pgvector extension on OpenShift..."** -- spaCy found 4 entities but with poor type accuracy: "Deployed PostgreSQL" tagged as PERSON, "ORM" as ORG. Stage 1 met the threshold (2+ entities), so Stages 2 and 3 never fired.
+
+3. **"Wes Jackson at Red Hat built MemoryHub..."** (entity-rich) -- spaCy found 11 entities including Wes Jackson (correct), Red Hat (correct), but also PostgreSQL as GPE (location), NER/LLM/GPT as ORG. Again, Stage 1 met threshold.
+
+**Key finding**: spaCy's `en_core_web_sm` aggressively tags technical terms and acronyms as ORG or GPE. This inflates the "high-confidence entity count" and prevents the cascade from reaching Stage 2 (GLiNER) or Stage 3 (LLM), even when spaCy's entity types are wrong. The cascade trigger counts entities but not type accuracy.
+
+**Possible improvements** (not in scope for this PR):
+- Count only entities with POLE+O-valid types from spaCy (filter out false-positive ORG tags on acronyms)
+- Always run GLiNER alongside spaCy rather than conditionally, since GLiNER's zero-shot labels are more accurate for technical domains
+- Add a confidence discount for spaCy entities that match common acronym patterns
+
 ## Open Questions
 
 1. **Extraction trigger for existing memories**: Phase 2 extraction runs at write time going forward. Do we backfill entity extraction for the existing memory corpus? Backfill could be done as a background migration task, but it will make a large number of LLM calls. Define scope and cost estimate before enabling `ENTITY_EXTRACTION_ENABLED=true` in production.
