@@ -284,7 +284,7 @@ class _LLMExtractor:
     def _load_prompt(self) -> str:
         """Load system prompt from prompts/entity_extraction.yaml."""
         prompt_path = (
-            Path(__file__).resolve().parents[2]
+            Path(__file__).resolve().parents[3]
             / "prompts" / "entity_extraction.yaml"
         )
         with open(prompt_path) as f:

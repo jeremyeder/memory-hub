@@ -28,6 +28,11 @@ cp "$REPO_ROOT/pyproject.toml" "$BUILD_DIR/memoryhub_core/"
 rsync -a --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' \
     "$REPO_ROOT/src/memoryhub_core/" "$BUILD_DIR/memoryhub_core/src/memoryhub_core/"
 
+# Copy prompts directory (used by LLM Stage 3 extraction)
+if [ -d "$REPO_ROOT/prompts" ]; then
+    cp -r "$REPO_ROOT/prompts" "$BUILD_DIR/memoryhub_core/prompts"
+fi
+
 # Fix permissions — Claude Code Write tool creates 600; OpenShift needs 644+
 # Also fix directory permissions so pip can create .egg-info during build
 FIXED_FILE_COUNT=$(find "$BUILD_DIR" -name "*.py" -perm 600 2>/dev/null | wc -l | tr -d ' ')
