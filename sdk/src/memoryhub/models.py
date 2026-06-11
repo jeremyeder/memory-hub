@@ -20,6 +20,8 @@ class Memory(BaseModel):
     scope: str = ""
     branch_type: str | None = None
     owner_id: str = ""
+    actor_id: str | None = None
+    driver_id: str | None = None
     is_current: bool = True
     version: int = 1
     parent_id: str | None = None
