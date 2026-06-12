@@ -10,11 +10,10 @@ import asyncio
 import logging
 import sys
 
-from memoryhub_core.services.database import get_session, init_db
-from memoryhub_core.services.conversation import run_retention_sweep
-from memoryhub_core.storage.s3 import S3StorageAdapter
 from memoryhub_core.config import MinIOSettings
-
+from memoryhub_core.services.conversation import run_retention_sweep
+from memoryhub_core.services.database import get_session, init_db
+from memoryhub_core.storage.s3 import S3StorageAdapter
 
 logging.basicConfig(
     level=logging.INFO,
