@@ -308,6 +308,45 @@ def disable_agent(
     )
 
 
+# ── Entity backfill (via MCP, not REST) ─────────────────────────────────────
+
+
+@admin_app.command("backfill-entities")
+def backfill_entities(
+    limit: int = typer.Option(50, "--limit", "-n", help="Max memories to process"),
+    include_failed: bool = typer.Option(
+        False, "--include-failed", help="Reprocess previously failed memories",
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.table, "--output", "-o", help="Output format: table, json, quiet",
+    ),
+):
+    """Run entity extraction on memories without extraction_status."""
+    from memoryhub_cli.main import _get_client, _run_command
+
+    client = _get_client(output)
+
+    async def _do():
+        async with client:
+            return await client.backfill_entities(
+                limit=limit, include_failed=include_failed,
+            )
+
+    result = _run_command(_do(), output)
+
+    if output == OutputFormat.json:
+        json_success(result)
+        return
+    if output == OutputFormat.quiet:
+        return
+
+    console.print("[bold]Entity Backfill Results[/bold]\n")
+    console.print(f"  Candidates:  {result.get('candidates', '-')}")
+    console.print(f"  Processed:   {result.get('processed', '-')}")
+    console.print(f"  Succeeded:   {result.get('succeeded', '-')}")
+    console.print(f"  Failed:      {result.get('failed', '-')}")
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 

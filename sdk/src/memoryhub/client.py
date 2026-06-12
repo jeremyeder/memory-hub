@@ -967,6 +967,34 @@ class MemoryHubClient:
         )
         return RenameEntityResult.model_validate(data)
 
+    async def backfill_entities(
+        self,
+        *,
+        limit: int = 50,
+        include_failed: bool = False,
+    ) -> dict[str, Any]:
+        """Run entity extraction on memories without extraction_status.
+
+        Admin operation. Processes up to ``limit`` memories that have not
+        yet had entity extraction run on them.
+
+        Args:
+            limit: Maximum number of memories to process (default 50).
+            include_failed: If True, also reprocess memories whose prior
+                extraction failed.
+
+        Returns:
+            Processing summary with candidates, processed, succeeded,
+            and failed counts.
+        """
+        opts: dict[str, Any] = {"limit": limit}
+        if include_failed:
+            opts["include_failed"] = True
+        return await self._call_action(
+            "backfill_entities",
+            options=opts,
+        )
+
     async def promote(
         self,
         memory_id: str,

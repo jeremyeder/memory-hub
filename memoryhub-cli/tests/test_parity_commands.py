@@ -474,3 +474,63 @@ class TestReconstruct:
             result = runner.invoke(app, ["reconstruct"])
         assert result.exit_code == 0
         assert "No behavioral memories found" in result.output
+
+
+# ── backfill-entities ───────────────────────────────────────────────────────
+
+
+SAMPLE_BACKFILL_RESULT = {
+    "candidates": 12,
+    "processed": 10,
+    "succeeded": 8,
+    "failed": 2,
+}
+
+
+class TestBackfillEntities:
+    def test_happy_path(self):
+        mock_client = _mock_client(
+            backfill_entities=AsyncMock(return_value=SAMPLE_BACKFILL_RESULT)
+        )
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(app, ["admin", "backfill-entities"])
+        assert result.exit_code == 0
+        assert "Backfill" in result.output
+        assert "8" in result.output
+
+    def test_json_output(self):
+        mock_client = _mock_client(
+            backfill_entities=AsyncMock(return_value=SAMPLE_BACKFILL_RESULT)
+        )
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["admin", "backfill-entities", "--output", "json"]
+            )
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed["status"] == "ok"
+        assert parsed["data"]["succeeded"] == 8
+
+    def test_include_failed_flag(self):
+        mock_backfill = AsyncMock(return_value=SAMPLE_BACKFILL_RESULT)
+        mock_client = _mock_client(backfill_entities=mock_backfill)
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["admin", "backfill-entities", "--include-failed"]
+            )
+        assert result.exit_code == 0
+        mock_backfill.assert_called_once()
+        call_kwargs = mock_backfill.call_args[1]
+        assert call_kwargs["include_failed"] is True
+
+    def test_custom_limit(self):
+        mock_backfill = AsyncMock(return_value=SAMPLE_BACKFILL_RESULT)
+        mock_client = _mock_client(backfill_entities=mock_backfill)
+        with patch("memoryhub_cli.main._get_client", return_value=mock_client):
+            result = runner.invoke(
+                app, ["admin", "backfill-entities", "--limit", "5"]
+            )
+        assert result.exit_code == 0
+        mock_backfill.assert_called_once()
+        call_kwargs = mock_backfill.call_args[1]
+        assert call_kwargs["limit"] == 5
