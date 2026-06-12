@@ -158,3 +158,28 @@ class CrossTenantRelationshipError(Exception):
             f"(tenant={source_tenant!r}) and target {target_id} "
             f"(tenant={target_tenant!r}) must share a tenant."
         )
+
+
+class ThreadNotFoundError(Exception):
+    """Raised when a conversation thread does not exist or is in another tenant."""
+
+    def __init__(self, thread_id: uuid.UUID) -> None:
+        self.thread_id = thread_id
+        super().__init__(f"Conversation thread {thread_id} not found")
+
+
+class ThreadNotActiveError(Exception):
+    """Raised when an operation requires an active thread but it is archived or deleted."""
+
+    def __init__(self, thread_id: uuid.UUID, status: str) -> None:
+        self.thread_id = thread_id
+        self.status = status
+        super().__init__(f"Thread {thread_id} is {status}; operation requires active status")
+
+
+class ThreadAccessDeniedError(Exception):
+    """Raised when the caller lacks permission for a thread operation."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"Thread access denied: {reason}")

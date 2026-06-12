@@ -73,6 +73,9 @@ class AppSettings(BaseSettings):
     s3_prefix_chars: int = 1000       # Chars used for embedding on oversized content (~250 tokens)
     session_ttl_seconds: int = 3600   # API-key session lifetime; auto-extends on activity
 
+    # Conversation thread persistence (#168)
+    conv_inline_max_bytes: int = 8192  # Messages above this go to S3
+
     # Phase 2 entity extraction (#170)
     entity_extraction_enabled: bool = False
     entity_extraction_concurrency: int = 10
