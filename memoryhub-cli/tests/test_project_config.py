@@ -525,10 +525,10 @@ def test_hook_script_template_uses_path_discovery_first():
     """CLI discovery should try PATH before project-local venvs."""
     lines = HOOK_SCRIPT_TEMPLATE.splitlines()
     path_check_idx = next(
-        i for i, l in enumerate(lines) if "command -v memoryhub" in l
+        i for i, line in enumerate(lines) if "command -v memoryhub" in line
     )
     venv_check_idx = next(
-        i for i, l in enumerate(lines) if ".venv/bin/memoryhub" in l
+        i for i, line in enumerate(lines) if ".venv/bin/memoryhub" in line
     )
     assert path_check_idx < venv_check_idx
 
@@ -540,7 +540,6 @@ def test_hook_script_template_has_jq_fallback():
 
 
 def test_write_hook_script_creates_executable(tmp_path: Path):
-    import os
     import stat
 
     hook_path = write_hook_script(tmp_path)
@@ -569,8 +568,6 @@ def test_merge_settings_hooks_creates_settings_json(tmp_path: Path):
 
 
 def test_merge_settings_hooks_is_idempotent(tmp_path: Path):
-    import json
-
     merge_settings_hooks(tmp_path)
     first = (tmp_path / ".claude" / "settings.json").read_text()
 
