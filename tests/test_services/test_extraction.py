@@ -12,6 +12,7 @@ import pytest
 from memoryhub_core.services.embeddings import MockEmbeddingService
 from memoryhub_core.services.extraction import (
     _ExtractionResult,
+    _is_programming_artifact,
     _merge_entities,
     _parse_json_best_effort,
     _should_run_stage2,
@@ -118,6 +119,92 @@ def test_run_spacy_ner_discounts_acronym_confidence():
     assert alice["confidence"] == 1.0, "Mixed case should keep full confidence"
     assert orm["confidence"] == 0.5, "Acronym should get discounted confidence"
     assert ner_ent["confidence"] == 0.5, "Acronym should get discounted confidence"
+
+
+# ── Programming artifact filter tests (#278) ────────────────────────────────
+
+
+@pytest.mark.parametrize("artifact", [
+    "jwks.json", "deploy-full.sh", "main.py", "config.yaml",
+    "notes.md", "data.sql", "package.lock",
+])
+def test_is_programming_artifact_file_names(artifact):
+    """File names with common extensions are detected (#278)."""
+    assert _is_programming_artifact(artifact), f"'{artifact}' should be a programming artifact"
+
+
+@pytest.mark.parametrize("verb", ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+def test_is_programming_artifact_http_verbs(verb):
+    """HTTP verbs are detected (#278)."""
+    assert _is_programming_artifact(verb), f"'{verb}' should be a programming artifact"
+
+
+@pytest.mark.parametrize("constant", [
+    "ACTIVE_SESSIONS_KEY", "MAX_RETRIES", "DB_CONNECTION_POOL",
+])
+def test_is_programming_artifact_caps_snake_constants(constant):
+    """ALL_CAPS_SNAKE_CASE constants are detected (#278)."""
+    assert _is_programming_artifact(constant), f"'{constant}' should be a programming artifact"
+
+
+@pytest.mark.parametrize("hash_str", [
+    "PVTSSF_lADODErzuc4BUFze", "abcdef0123456789",
+])
+def test_is_programming_artifact_hashes_and_ids(hash_str):
+    """Hex hashes and ID-prefix strings are detected (#278)."""
+    assert _is_programming_artifact(hash_str), f"'{hash_str}' should be a programming artifact"
+
+
+@pytest.mark.parametrize("camel", ["noCache", "imageStream", "pageSize"])
+def test_is_programming_artifact_lower_camel_case(camel):
+    """lowerCamelCase config keys are detected (#278)."""
+    assert _is_programming_artifact(camel), f"'{camel}' should be a programming artifact"
+
+
+@pytest.mark.parametrize("k8s", ["ImageStream", "BuildConfig", "ConfigMap", "ServiceMonitor"])
+def test_is_programming_artifact_k8s_types(k8s):
+    """Kubernetes resource type names are detected (#278)."""
+    assert _is_programming_artifact(k8s), f"'{k8s}' should be a programming artifact"
+
+
+@pytest.mark.parametrize("real_name", [
+    "Alice Johnson", "Red Hat", "New York", "OpenAI", "Wes",
+])
+def test_is_programming_artifact_preserves_real_names(real_name):
+    """Real entity names are not falsely flagged (#278)."""
+    assert not _is_programming_artifact(real_name), f"'{real_name}' should NOT be a programming artifact"
+
+
+@pytest.mark.parametrize("artifact,label", [
+    ("jwks.json", "PERSON"),
+    ("deploy-full.sh", "PERSON"),
+    ("POST", "ORG"),
+    ("noCache", "ORG"),
+    ("ACTIVE_SESSIONS_KEY", "LOCATION"),
+    ("ImageStream", "ORG"),
+    ("PVTSSF_lADODErzuc4BUFze", "PERSON"),
+])
+def test_run_spacy_ner_filters_programming_artifacts(artifact, label):
+    """spaCy false positives for programming artifacts are filtered (#278)."""
+    fake = FakeNlp([SpacyEntity(artifact, label, 0, len(artifact))])
+    with patch("memoryhub_core.services.extraction._get_nlp", return_value=fake):
+        result = run_spacy_ner(f"The {artifact} is configured.")
+    assert len(result) == 0, f"'{artifact}' should have been filtered as a programming artifact"
+
+
+def test_run_spacy_ner_preserves_real_entities_with_filter():
+    """Real entities are not affected by the programming artifact filter (#278)."""
+    fake = FakeNlp([
+        SpacyEntity("Alice Johnson", "PERSON", 0, 13),
+        SpacyEntity("Red Hat", "ORG", 19, 26),
+        SpacyEntity("New York", "GPE", 30, 38),
+        SpacyEntity("jwks.json", "PERSON", 45, 54),  # should be filtered
+    ])
+    with patch("memoryhub_core.services.extraction._get_nlp", return_value=fake):
+        result = run_spacy_ner("Alice Johnson at Red Hat in New York used jwks.json")
+    assert len(result) == 3
+    names = {e["name"] for e in result}
+    assert names == {"Alice Johnson", "Red Hat", "New York"}
 
 
 # ── extract_entities_from_memory tests ───────────────────────────────────────

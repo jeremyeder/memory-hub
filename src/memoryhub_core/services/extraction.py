@@ -55,6 +55,66 @@ _SPACY_LABEL_MAP: dict[str, str] = {
 _ACRONYM_PATTERN = re.compile(r"^[A-Z]{2,}$")
 _ACRONYM_CONFIDENCE_DISCOUNT = 0.5
 
+# ---------------------------------------------------------------------------
+# Programming artifact false-positive filter (#278)
+# ---------------------------------------------------------------------------
+
+# File extensions commonly seen in agent memory content
+_FILE_EXTENSION_PATTERN = re.compile(
+    r"\.\b(?:json|sh|py|yaml|yml|md|txt|toml|cfg|ini|xml|html|css|js|ts|go|rs"
+    r"|java|rb|sql|env|lock|log)\b$"
+)
+
+# ALL_CAPS_SNAKE_CASE constants (must have at least one underscore)
+_CAPS_SNAKE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$")
+
+# Hex sequences 8+ chars (git SHAs, API keys, etc.)
+_HEX_HASH_PATTERN = re.compile(r"^[0-9a-fA-F]{8,}$")
+
+# Base64-like identifier strings (mixed case, digits, underscores, dashes)
+_ID_PREFIX_PATTERN = re.compile(r"^PVTSSF_|^PVT_|^ghp_|^gho_|^sk-")
+
+# lowerCamelCase (starts lowercase, has at least one uppercase letter)
+_LOWER_CAMEL_PATTERN = re.compile(r"^[a-z]+[A-Z]")
+
+# HTTP verbs that spaCy sometimes tags as ORG/PERSON
+_HTTP_VERBS = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"})
+
+# Kubernetes/OpenShift resource type names that look like proper nouns
+_K8S_RESOURCE_TYPES = frozenset({
+    "ImageStream", "BuildConfig", "DeploymentConfig", "StatefulSet",
+    "DaemonSet", "ReplicaSet", "CronJob", "ConfigMap", "ServiceAccount",
+    "ClusterRole", "ClusterRoleBinding", "RoleBinding",
+    "PersistentVolume", "PersistentVolumeClaim", "StorageClass",
+    "NetworkPolicy", "ResourceQuota", "LimitRange",
+    "HorizontalPodAutoscaler", "PodDisruptionBudget", "ServiceMonitor",
+})
+
+
+def _is_programming_artifact(name: str) -> bool:
+    """Return True if *name* looks like a programming artifact, not a real entity.
+
+    Catches file names, HTTP verbs, CAPS_SNAKE constants, hex/ID hashes,
+    lowerCamelCase config keys, and Kubernetes resource type names.
+    Conservative: better to miss a false positive than filter a real entity.
+    """
+    if _FILE_EXTENSION_PATTERN.search(name):
+        return True
+    if name in _HTTP_VERBS:
+        return True
+    if _CAPS_SNAKE_PATTERN.match(name):
+        return True
+    if _HEX_HASH_PATTERN.match(name):
+        return True
+    if _ID_PREFIX_PATTERN.match(name):
+        return True
+    if name in _K8S_RESOURCE_TYPES:
+        return True
+    if _LOWER_CAMEL_PATTERN.match(name):
+        return True
+    return False
+
+
 _nlp = None
 
 
@@ -89,6 +149,8 @@ def run_spacy_ner(text: str) -> list[dict[str, Any]]:
             continue
 
         name = ent.text.strip()
+        if _is_programming_artifact(name):
+            continue
         key = (name.lower(), pole_type)
         if key in seen:
             continue
