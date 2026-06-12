@@ -9,14 +9,13 @@ set -euo pipefail
 PROJECT="${1:-memoryhub-auth}"
 CONTEXT="${MEMORYHUB_CONTEXT:-mcp-rhoai}"
 
-# Manifest is rewritten through sed to embed the project-qualified registry
-# path and cluster-specific URLs.  Secrets are managed out-of-band --
-# they're documented in openshift.yaml comments and created by this script
-# before the apply -- so the manifest itself contains no Secret stanzas and
-# the apply pipeline is just sed + oc apply.
+# Manifest is rewritten through sed to embed cluster-specific URLs.
+# The image reference stays as the short imagestream tag (auth-server:latest)
+# so the resolve-names annotation can rewrite it to a pinned digest at
+# apply time.  Rewriting to the full registry path defeats the annotation
+# and causes #88 digest mismatches.
 apply_manifest() {
-    sed "s|image: auth-server:latest|image: image-registry.openshift-image-registry.svc:5000/$PROJECT/auth-server:latest|g; \
-         s|__AUTH_ISSUER__|${AUTH_ISSUER_URL}|g; \
+    sed "s|__AUTH_ISSUER__|${AUTH_ISSUER_URL}|g; \
          s|__OAUTH_AUTHORIZE_URL__|${OAUTH_AUTHORIZE_URL}|g" openshift.yaml | \
         oc apply --context "$CONTEXT" -f - -n "$PROJECT"
 }
