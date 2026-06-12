@@ -203,6 +203,12 @@ class TestThreadOptionsForwarding:
             assert opts["tool_call_id"] == "tc-123"
 
     @pytest.mark.asyncio
+    async def test_append_opts_include_a2a(self):
+        from src.tools.thread import _APPEND_OPTS
+
+        assert "a2a_context_id" in _APPEND_OPTS
+
+    @pytest.mark.asyncio
     async def test_get_forwards_valid_options(self):
         from src.tools.thread import thread
 
@@ -336,3 +342,112 @@ class TestExtractAction:
             assert mock.call_args[0][0] == tid  # thread_id
             assert isinstance(mock.call_args[0][1], dict)  # opts
             assert result["extracted_count"] == 3
+
+
+class TestForkAction:
+    @pytest.mark.asyncio
+    async def test_fork_in_valid_actions(self):
+        from src.tools.thread import _VALID_ACTIONS
+
+        assert "fork" in _VALID_ACTIONS
+
+    @pytest.mark.asyncio
+    async def test_fork_requires_thread_id(self):
+        from src.tools.thread import thread
+
+        with pytest.raises(ToolError, match="requires 'thread_id'"):
+            await thread(action="fork")
+
+    @pytest.mark.asyncio
+    async def test_fork_invalid_thread_id(self):
+        from src.tools.thread import thread
+
+        with pytest.raises(ToolError, match="Invalid thread_id"):
+            await thread(action="fork", thread_id="not-a-uuid")
+
+    @pytest.mark.asyncio
+    async def test_fork_opts_forwarded(self):
+        from src.tools.thread import _FORK_OPTS, _forward
+
+        test_opts = {
+            "from_sequence": 5,
+            "title": "test",
+            "garbage": "x",
+        }
+        result = _forward(test_opts, _FORK_OPTS)
+
+        assert "from_sequence" in result
+        assert "title" in result
+        assert "garbage" not in result
+        assert result["from_sequence"] == 5
+        assert result["title"] == "test"
+
+    @pytest.mark.asyncio
+    async def test_fork_action_dispatched(self):
+        from src.tools.thread import thread
+
+        tid = str(uuid.uuid4())
+        with patch("src.tools.thread._dispatch_fork", new_callable=AsyncMock) as mock:
+            mock.return_value = {"id": "test"}
+            result = await thread(action="fork", thread_id=tid)
+            mock.assert_awaited_once()
+            # _dispatch_fork(thread_id, opts, ctx)
+            assert mock.call_args[0][0] == tid  # thread_id
+            assert isinstance(mock.call_args[0][1], dict)  # opts
+            assert result["id"] == "test"
+
+
+class TestShareAction:
+    @pytest.mark.asyncio
+    async def test_share_in_valid_actions(self):
+        from src.tools.thread import _VALID_ACTIONS
+
+        assert "share" in _VALID_ACTIONS
+
+    @pytest.mark.asyncio
+    async def test_share_requires_thread_id(self):
+        from src.tools.thread import thread
+
+        with pytest.raises(ToolError, match="requires 'thread_id'"):
+            await thread(action="share")
+
+    @pytest.mark.asyncio
+    async def test_share_invalid_thread_id(self):
+        from src.tools.thread import thread
+
+        with pytest.raises(ToolError, match="Invalid thread_id"):
+            await thread(action="share", thread_id="not-a-uuid")
+
+    @pytest.mark.asyncio
+    async def test_share_opts_forwarded(self):
+        from src.tools.thread import _SHARE_OPTS, _forward
+
+        test_opts = {
+            "grantee_id": "agent-b",
+            "access_level": "read",
+            "authorized_by": "admin",
+            "junk": "x",
+        }
+        result = _forward(test_opts, _SHARE_OPTS)
+
+        assert "grantee_id" in result
+        assert "access_level" in result
+        assert "authorized_by" in result
+        assert "junk" not in result
+        assert result["grantee_id"] == "agent-b"
+        assert result["access_level"] == "read"
+        assert result["authorized_by"] == "admin"
+
+    @pytest.mark.asyncio
+    async def test_share_action_dispatched(self):
+        from src.tools.thread import thread
+
+        tid = str(uuid.uuid4())
+        with patch("src.tools.thread._dispatch_share", new_callable=AsyncMock) as mock:
+            mock.return_value = {"id": "test"}
+            result = await thread(action="share", thread_id=tid)
+            mock.assert_awaited_once()
+            # _dispatch_share(thread_id, opts, ctx)
+            assert mock.call_args[0][0] == tid  # thread_id
+            assert isinstance(mock.call_args[0][1], dict)  # opts
+            assert result["id"] == "test"
