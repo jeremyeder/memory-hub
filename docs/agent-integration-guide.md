@@ -158,11 +158,31 @@ MemoryHub supports three integration paths, each optimized for a different
 model capability tier. Choose based on your model's context budget and
 tool-calling ability.
 
+### Which path should I use?
+
+```
+Do you control prompt assembly?
+├── Yes → Path 1: Framework connector (SDK injection)
+│         Best for: custom agents, small models, zero tool-token overhead
+│
+└── No
+    ├── Does your host support hooks? (e.g., Claude Code)
+    │   └── Yes → Hook-based injection + compact MCP profile
+    │             Best for: Claude Code, lowest latency, content-only startup
+    │
+    └── Does your model handle action-dispatch well?
+        ├── Yes → Path 3: Compact MCP profile (frontier models)
+        │         Best for: Claude, GPT-4, low tool-token overhead
+        │
+        └── No → Path 2: Full MCP profile (mid-range models)
+                  Best for: Llama 70B, Mixtral, explicit per-tool schemas
+```
+
 | Model tier | Integration path | Tool tokens | Tools |
 |---|---|---|---|
 | Small (7B, Granite 8B) | Framework connector (`self.memory`) | 0 | n/a |
-| Mid-range (Llama 70B, Mixtral) | Full MCP profile (`MEMORYHUB_TOOL_PROFILE=full`) | ~6,800 | 10 |
-| Frontier (Claude, GPT-4) | Compact MCP profile | ~895 | 2 |
+| Mid-range (Llama 70B, Mixtral) | Full MCP profile (`MEMORYHUB_TOOL_PROFILE=full`) | ~7,500 | 12 |
+| Frontier (Claude, GPT-4) | Compact MCP profile | ~1,200 | 3 |
 
 ### Path 1: Framework connector (small models)
 
@@ -182,9 +202,12 @@ prefix = build_memory_prefix(memories)
 # Inject prefix into system prompt or first message
 ```
 
+See [`examples/tier1_sdk_injection.py`](examples/tier1_sdk_injection.py) for
+a complete standalone script showing this pattern.
+
 **Requirements:**
-- SDK v0.6.0+ (`pip install memoryhub>=0.6.0`). Earlier versions fail on
-  stub results returned by cache-optimized search.
+- SDK v0.14.0+ (`pip install memoryhub>=0.14.0`). Earlier versions lack
+  compact output support and hook integration.
 
 **Known issue:** The fipsagents `build_memory_prefix()` default calls
 `search("")`, which MemoryHub rejects (empty queries are not allowed).
@@ -197,9 +220,44 @@ Pass a non-empty query, or catch the error and fall back to no memories.
   constraints. RAG-style extraction tends to work better (see
   [Granite 8B findings](#granite-8b-findings) below).
 
+### Hook-based startup injection (recommended for Claude Code)
+
+The recommended approach for Claude Code and other MCP hosts that support
+hooks. Memories are loaded at session start by a shell hook and injected
+as a `<memoryhub-context>` block in the conversation context -- zero tool
+calls, zero latency during the conversation.
+
+**Setup:**
+
+```bash
+memoryhub config init
+```
+
+This scaffolds a `.memoryhub.yaml` config file, a loading rule at
+`.claude/rules/memoryhub-loading.md`, and a SessionStart hook in
+`.claude/settings.json`. The hook calls the CLI to search for relevant
+memories and injects them as compact, content-only text.
+
+**How it works:**
+
+1. On session start, the hook runs `memoryhub search` with `--output compact`
+2. Results are injected as a `<memoryhub-context>` block in the system prompt
+3. The loading rule tells the model to use these memories as its working set
+4. During the session, the model calls MCP tools only for writes and pivots
+
+**Performance:** Hook execution takes ~0.3s, well within the 5s timeout.
+
+**When to use this path:**
+- Claude Code projects (primary use case)
+- Any MCP host with SessionStart hook support
+- When you want zero-tool-call memory at startup
+
+This path complements the compact MCP profile (Path 3) -- hooks handle
+read-at-startup, MCP tools handle writes and mid-session searches.
+
 ### Path 2: Full MCP profile (mid-range models)
 
-Ten flat-parameter tools, each with its own JSON schema. Mid-range models
+Twelve flat-parameter tools, each with its own JSON schema. Mid-range models
 benefit from explicit parameter schemas that make each operation
 independently discoverable.
 
@@ -210,31 +268,35 @@ MEMORYHUB_TOOL_PROFILE=full
 ```
 
 Tools: `register_session`, `search_memory`, `write_memory`, `read_memory`,
-`update_memory`, `delete_memory`, `manage_session`, `manage_graph`,
-`manage_curation`, `manage_project`.
+`update_memory`, `delete_memory`, `list_memory`, `manage_session`,
+`manage_graph`, `manage_curation`, `manage_project`, `thread`.
 
 Full-profile search and list tools return verbose output (full metadata) by default for backward compatibility. Pass `verbose=false` to get compact content-only results.
 
 ### Path 3: Compact MCP profile (frontier models)
 
-Two tools: `register_session` and a single `memory` dispatcher that
-accepts an `action` parameter with 19 possible actions. Frontier models
-handle the action-dispatch pattern well, and the reduced tool count
-leaves more context for the actual conversation.
+Three tools: `register_session`, a `memory` dispatcher (29 actions for
+memory operations), and a `thread` dispatcher (9 actions for conversation
+persistence). Frontier models handle the action-dispatch pattern well, and
+the reduced tool count leaves more context for the actual conversation.
 
 ```
 MEMORYHUB_TOOL_PROFILE=compact   # default
 ```
 
-Tools: `register_session`, `memory(action=...)`.
+Tools: `register_session`, `memory(action=...)`, `thread(action=...)`.
 
-Compact-profile `search` and `list` actions now return content-only results by default: each entry contains `{id, content, result_type}` with no structural metadata. This is complementary to the hook-based startup injection (Path 1.5, see [memoryhub-loading rule](../.claude/rules/memoryhub-loading.md)) which is also content-only. Pass `options: {verbose: true}` when full metadata is needed (e.g., for curation decisions that depend on weight or scope).
+**Setup for Claude Code:** Run `memoryhub config init` in your project root
+to scaffold hooks and the loading rule. This pairs hook-based startup
+injection with the compact MCP profile for mid-session operations.
+
+Compact-profile `search` and `list` actions now return content-only results by default: each entry contains `{id, content, result_type}` with no structural metadata. This is complementary to [hook-based startup injection](#hook-based-startup-injection-recommended-for-claude-code) which is also content-only. Pass `options: {verbose: true}` when full metadata is needed (e.g., for curation decisions that depend on weight or scope).
 
 ### Why not the minimal profile for small models?
 
-The minimal profile (4 tools: `register_session`, `search_memory`,
-`write_memory`, `read_memory`) was designed as a middle ground for small
-models. In practice, even 4 tools are too heavy for 7B context budgets:
+The minimal profile (5 tools: `register_session`, `search_memory`,
+`write_memory`, `read_memory`, `thread`) was designed as a middle ground for small
+models. In practice, even 5 tools are too heavy for 7B context budgets:
 `search_memory`'s docstring alone is ~2K tokens. The framework connector
 path is the better choice for small models because it uses zero tool
 tokens.
