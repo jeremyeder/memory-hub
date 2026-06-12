@@ -11,12 +11,11 @@ from typing import Annotated, Any
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import Field
-
 from src.core.app import mcp
 
 logger = logging.getLogger(__name__)
 
-_VALID_ACTIONS = frozenset({"create", "append", "get", "list", "archive"})
+_VALID_ACTIONS = frozenset({"create", "append", "get", "list", "archive", "extract"})
 
 _CREATE_OPTS = frozenset({
     "title", "participant_ids", "participant_access",
@@ -28,6 +27,7 @@ _LIST_OPTS = frozenset({
     "scope_id", "status", "participant_id", "limit", "offset",
 })
 _ARCHIVE_OPTS = frozenset({"reason"})
+_EXTRACT_OPTS = frozenset({"turn_range", "model", "model_url"})
 
 
 def _require(action: str, name: str, value: Any) -> Any:
@@ -55,7 +55,7 @@ async def thread(
     action: Annotated[
         str,
         Field(description=(
-            "The operation to perform: create, append, get, list, archive."
+            "The operation to perform: create, append, get, list, archive, extract."
         )),
     ],
     thread_id: Annotated[
@@ -104,6 +104,8 @@ async def thread(
         List threads visible to the caller.
       archive(thread_id, [options: reason])
         Archive a thread. Immutable thereafter.
+      extract(thread_id, [options: turn_range, model, model_url])
+        Trigger extraction pipeline. Produces memory nodes from messages.
     """
     if action not in _VALID_ACTIONS:
         raise ToolError(
@@ -121,12 +123,12 @@ async def thread(
         return await _dispatch_get(thread_id, opts, ctx)
     if action == "list":
         return await _dispatch_list(scope, opts, ctx)
-    return await _dispatch_archive(thread_id, opts, ctx)
+    if action == "archive":
+        return await _dispatch_archive(thread_id, opts, ctx)
+    return await _dispatch_extract(thread_id, opts, ctx)
 
 
 async def _dispatch_create(scope, opts, ctx):
-    from memoryhub_core.models.schemas import ConversationThreadCreate
-    from memoryhub_core.services.conversation import create_thread
     from src.core.authz import (
         AuthenticationError,
         authorize_write,
@@ -134,6 +136,9 @@ async def _dispatch_create(scope, opts, ctx):
         get_tenant_filter,
     )
     from src.tools._deps import get_db_session, release_db_session
+
+    from memoryhub_core.models.schemas import ConversationThreadCreate
+    from memoryhub_core.services.conversation import create_thread
 
     _require("create", "scope", scope)
 
@@ -169,12 +174,6 @@ async def _dispatch_create(scope, opts, ctx):
 
 
 async def _dispatch_append(thread_id_str, role, content, opts, ctx):
-    from memoryhub_core.models.schemas import ConversationMessageCreate
-    from memoryhub_core.services.conversation import append_message, get_thread
-    from memoryhub_core.services.exceptions import (
-        ThreadNotActiveError,
-        ThreadNotFoundError,
-    )
     from src.core.authz import (
         AuthenticationError,
         authorize_thread_write,
@@ -182,6 +181,13 @@ async def _dispatch_append(thread_id_str, role, content, opts, ctx):
         get_tenant_filter,
     )
     from src.tools._deps import get_db_session, get_s3_adapter, release_db_session
+
+    from memoryhub_core.models.schemas import ConversationMessageCreate
+    from memoryhub_core.services.conversation import append_message, get_thread
+    from memoryhub_core.services.exceptions import (
+        ThreadNotActiveError,
+        ThreadNotFoundError,
+    )
 
     _require("append", "thread_id", thread_id_str)
     _require("append", "role", role)
@@ -248,7 +254,6 @@ async def _dispatch_append(thread_id_str, role, content, opts, ctx):
 
 
 async def _dispatch_get(thread_id_str, opts, ctx):
-    from memoryhub_core.services.conversation import get_thread
     from src.core.authz import (
         AuthenticationError,
         authorize_thread_read,
@@ -256,6 +261,8 @@ async def _dispatch_get(thread_id_str, opts, ctx):
         get_tenant_filter,
     )
     from src.tools._deps import get_db_session, get_s3_adapter, release_db_session
+
+    from memoryhub_core.services.conversation import get_thread
 
     _require("get", "thread_id", thread_id_str)
 
@@ -312,13 +319,14 @@ async def _dispatch_get(thread_id_str, opts, ctx):
 
 
 async def _dispatch_list(scope, opts, ctx):
-    from memoryhub_core.services.conversation import list_threads
     from src.core.authz import (
         AuthenticationError,
         get_claims_from_context,
         get_tenant_filter,
     )
     from src.tools._deps import get_db_session, release_db_session
+
+    from memoryhub_core.services.conversation import list_threads
 
     try:
         claims = get_claims_from_context()
@@ -347,11 +355,6 @@ async def _dispatch_list(scope, opts, ctx):
 
 
 async def _dispatch_archive(thread_id_str, opts, ctx):
-    from memoryhub_core.services.conversation import archive_thread
-    from memoryhub_core.services.exceptions import (
-        ThreadNotActiveError,
-        ThreadNotFoundError,
-    )
     from src.core.authz import (
         AuthenticationError,
         authorize_thread_admin,
@@ -359,6 +362,12 @@ async def _dispatch_archive(thread_id_str, opts, ctx):
         get_tenant_filter,
     )
     from src.tools._deps import get_db_session, release_db_session
+
+    from memoryhub_core.services.conversation import archive_thread
+    from memoryhub_core.services.exceptions import (
+        ThreadNotActiveError,
+        ThreadNotFoundError,
+    )
 
     _require("archive", "thread_id", thread_id_str)
 
@@ -400,6 +409,90 @@ async def _dispatch_archive(thread_id_str, opts, ctx):
     except ThreadNotFoundError as exc:
         raise ToolError("Thread not found.") from exc
     except ThreadNotActiveError as exc:
+        raise ToolError(str(exc)) from exc
+    finally:
+        await release_db_session(gen)
+
+
+async def _dispatch_extract(thread_id_str, opts, ctx):
+    from src.core.authz import (
+        AuthenticationError,
+        authorize_thread_read,
+        get_claims_from_context,
+        get_tenant_filter,
+    )
+    from src.tools._deps import get_db_session, get_embedding_service, get_s3_adapter, release_db_session
+
+    from memoryhub_core.services.conversation_extraction import extract_from_thread
+    from memoryhub_core.services.exceptions import ThreadNotFoundError
+
+    _require("extract", "thread_id", thread_id_str)
+
+    try:
+        tid = uuid.UUID(thread_id_str)
+    except ValueError as exc:
+        raise ToolError(f"Invalid thread_id: {thread_id_str}") from exc
+
+    try:
+        claims = get_claims_from_context()
+    except AuthenticationError as exc:
+        raise ToolError(str(exc)) from exc
+
+    tenant = get_tenant_filter(claims)
+    caller_id = claims["sub"]
+    s3_adapter = get_s3_adapter()
+    embedding_service = get_embedding_service()
+
+    extract_opts = _forward(opts, _EXTRACT_OPTS)
+
+    turn_range = None
+    if "turn_range" in extract_opts:
+        tr = extract_opts["turn_range"]
+        if isinstance(tr, (list, tuple)) and len(tr) == 2:
+            turn_range = (int(tr[0]), int(tr[1]))
+        elif isinstance(tr, str) and "-" in tr:
+            parts = tr.split("-", 1)
+            turn_range = (int(parts[0]), int(parts[1]))
+
+    session, gen = await get_db_session()
+    try:
+        from sqlalchemy import select
+
+        from memoryhub_core.models.conversation import ConversationThread
+
+        stmt = select(ConversationThread).where(
+            ConversationThread.id == tid,
+            ConversationThread.tenant_id == tenant,
+        )
+        res = await session.execute(stmt)
+        thread_obj = res.scalar_one_or_none()
+
+        if thread_obj is None:
+            raise ToolError("Thread not found.")
+        if not authorize_thread_read(claims, thread_obj):
+            raise ToolError("Thread not found.")
+
+        result = await extract_from_thread(
+            session,
+            thread_id=tid,
+            tenant_id=tenant,
+            owner_id=caller_id,
+            embedding_service=embedding_service,
+            s3_adapter=s3_adapter,
+            model_override=extract_opts.get("model"),
+            url_override=extract_opts.get("model_url"),
+            turn_range=turn_range,
+        )
+
+        if ctx is not None:
+            await ctx.info(
+                f"Extracted {result['extracted_count']} memories, "
+                f"cursor={result['cursor']}, failures={result['failures']}"
+            )
+        return result
+    except ThreadNotFoundError as exc:
+        raise ToolError("Thread not found.") from exc
+    except ValueError as exc:
         raise ToolError(str(exc)) from exc
     finally:
         await release_db_session(gen)
