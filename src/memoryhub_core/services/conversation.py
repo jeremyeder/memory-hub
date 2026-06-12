@@ -2,16 +2,23 @@
 
 import asyncio
 import io
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from memoryhub_core.config import AppSettings
-from memoryhub_core.models.conversation import ConversationMessage, ConversationThread
+from memoryhub_core.models.conversation import (
+    ConversationExtraction,
+    ConversationMessage,
+    ConversationThread,
+    PurgeLog,
+)
 from memoryhub_core.models.schemas import (
     ConversationMessageCreate,
     ConversationMessageRead,
@@ -20,6 +27,8 @@ from memoryhub_core.models.schemas import (
 )
 from memoryhub_core.services.exceptions import ThreadNotActiveError, ThreadNotFoundError
 from memoryhub_core.storage.s3 import S3StorageAdapter
+
+logger = logging.getLogger(__name__)
 
 
 async def _store_message_s3(
@@ -565,3 +574,382 @@ async def lookup_thread_by_a2a_context(
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Retention, deletion, and purge
+# ---------------------------------------------------------------------------
+
+
+async def _cascade_to_memories(
+    session: AsyncSession,
+    thread_id: uuid.UUID,
+    cascade_mode: str,
+    s3_adapter: S3StorageAdapter | None = None,
+) -> int:
+    """Apply cascade policy to extracted memories. Returns count affected."""
+    from memoryhub_core.services.memory import delete_memory
+
+    if cascade_mode == "preserve":
+        return 0
+
+    # Find extraction records for this thread
+    ext_stmt = select(ConversationExtraction).where(
+        ConversationExtraction.thread_id == thread_id,
+    )
+    ext_result = await session.execute(ext_stmt)
+    extractions = list(ext_result.scalars().all())
+
+    if not extractions:
+        return 0
+
+    if cascade_mode == "orphan":
+        # Sever provenance links -- delete extraction records, keep memories
+        await session.execute(
+            sa_delete(ConversationExtraction).where(
+                ConversationExtraction.thread_id == thread_id,
+            )
+        )
+        return len(extractions)
+
+    # cascade_mode == "delete" (default)
+    # Soft-delete memories that have no other provenance source
+    deleted_count = 0
+    for ext in extractions:
+        # Count how many extraction records point to this memory
+        count_stmt = select(func.count()).select_from(ConversationExtraction).where(
+            ConversationExtraction.memory_node_id == ext.memory_node_id,
+        )
+        count_result = await session.execute(count_stmt)
+        total_refs = count_result.scalar_one()
+
+        if total_refs <= 1:
+            try:
+                await delete_memory(ext.memory_node_id, session, s3_adapter=s3_adapter)
+                deleted_count += 1
+            except Exception:
+                logger.warning(
+                    "Failed to cascade-delete memory %s from thread %s",
+                    ext.memory_node_id, thread_id, exc_info=True,
+                )
+
+    return deleted_count
+
+
+async def soft_delete_thread(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    thread_id: uuid.UUID,
+    purged_by: str,
+    reason: str = "retention",
+    cascade_override: str | None = None,
+) -> ConversationThreadRead:
+    """Soft-delete a thread with cascade per retention policy.
+
+    If the thread has legal_hold=True, status is set to 'pending_deletion'
+    instead of 'deleted'. Cascade is applied regardless.
+    """
+    stmt = select(ConversationThread).where(
+        ConversationThread.id == thread_id,
+        ConversationThread.tenant_id == tenant_id,
+    )
+    result = await session.execute(stmt)
+    thread = result.scalar_one_or_none()
+
+    if thread is None:
+        raise ThreadNotFoundError(thread_id)
+
+    now = datetime.now(UTC)
+
+    if thread.legal_hold:
+        thread.status = "pending_deletion"
+    else:
+        thread.status = "deleted"
+        thread.deleted_at = now
+
+    # Determine cascade mode
+    retention = thread.retention_policy or {}
+    cascade_mode = cascade_override or retention.get("cascade_to_memories", "delete")
+
+    await _cascade_to_memories(session, thread_id, cascade_mode)
+
+    # Audit record
+    log_entry = PurgeLog(
+        id=uuid.uuid4(),
+        resource_type="thread",
+        resource_id=thread_id,
+        purged_by=purged_by,
+        reason=reason,
+    )
+    session.add(log_entry)
+
+    await session.commit()
+    await session.refresh(thread)
+
+    return ConversationThreadRead.model_validate(thread)
+
+
+async def hard_delete_thread(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    thread_id: uuid.UUID,
+    s3_adapter: S3StorageAdapter | None = None,
+) -> None:
+    """Physically remove a thread and all associated data.
+
+    Raises ThreadNotFoundError if the thread doesn't exist.
+    Raises ValueError if the thread has legal_hold=True.
+    """
+    stmt = select(ConversationThread).where(
+        ConversationThread.id == thread_id,
+        ConversationThread.tenant_id == tenant_id,
+    )
+    result = await session.execute(stmt)
+    thread = result.scalar_one_or_none()
+
+    if thread is None:
+        raise ThreadNotFoundError(thread_id)
+
+    if thread.legal_hold:
+        raise ValueError(
+            f"Cannot hard-delete thread {thread_id}: legal_hold is active. "
+            "Use admin_purge_thread with justification to override."
+        )
+
+    # Collect S3 refs before deletion
+    if s3_adapter is not None:
+        s3_stmt = select(ConversationMessage.content_ref).where(
+            ConversationMessage.thread_id == thread_id,
+            ConversationMessage.storage_type == "s3",
+            ConversationMessage.content_ref.isnot(None),
+        )
+        s3_result = await session.execute(s3_stmt)
+        s3_refs = [row[0] for row in s3_result.all()]
+    else:
+        s3_refs = []
+
+    # Delete extraction records (RESTRICT FK requires explicit delete)
+    await session.execute(
+        sa_delete(ConversationExtraction).where(
+            ConversationExtraction.thread_id == thread_id,
+        )
+    )
+
+    # Delete thread (CASCADE handles messages and extraction_failures)
+    await session.execute(
+        sa_delete(ConversationThread).where(
+            ConversationThread.id == thread_id,
+        )
+    )
+
+    await session.commit()
+
+    # Clean up S3 objects after DB commit
+    if s3_refs and s3_adapter is not None:
+        await s3_adapter.delete_contents(s3_refs)
+
+
+async def admin_purge_thread(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    thread_id: uuid.UUID,
+    purged_by: str,
+    justification: str,
+    s3_adapter: S3StorageAdapter | None = None,
+) -> None:
+    """Hard-delete with audit. Overrides legal hold with justification."""
+    stmt = select(ConversationThread).where(
+        ConversationThread.id == thread_id,
+        ConversationThread.tenant_id == tenant_id,
+    )
+    result = await session.execute(stmt)
+    thread = result.scalar_one_or_none()
+
+    if thread is None:
+        raise ThreadNotFoundError(thread_id)
+
+    # Cascade-delete extracted memories
+    await _cascade_to_memories(session, thread_id, "delete", s3_adapter=s3_adapter)
+
+    # Audit record
+    log_entry = PurgeLog(
+        id=uuid.uuid4(),
+        resource_type="thread",
+        resource_id=thread_id,
+        purged_by=purged_by,
+        reason="admin",
+        incident_ref=justification,
+    )
+    session.add(log_entry)
+
+    # Clear legal hold to allow hard delete
+    if thread.legal_hold:
+        thread.legal_hold = False
+        await session.flush()
+
+    # Collect S3 refs
+    s3_refs: list[str] = []
+    if s3_adapter is not None:
+        s3_stmt = select(ConversationMessage.content_ref).where(
+            ConversationMessage.thread_id == thread_id,
+            ConversationMessage.storage_type == "s3",
+            ConversationMessage.content_ref.isnot(None),
+        )
+        s3_result = await session.execute(s3_stmt)
+        s3_refs = [row[0] for row in s3_result.all()]
+
+    # Delete extraction records, then thread (CASCADE handles messages)
+    await session.execute(
+        sa_delete(ConversationExtraction).where(
+            ConversationExtraction.thread_id == thread_id,
+        )
+    )
+    await session.execute(
+        sa_delete(ConversationThread).where(ConversationThread.id == thread_id)
+    )
+
+    await session.commit()
+
+    if s3_refs and s3_adapter is not None:
+        await s3_adapter.delete_contents(s3_refs)
+
+
+async def spill_response_thread(
+    session: AsyncSession,
+    *,
+    tenant_id: str,
+    thread_id: uuid.UUID,
+    purged_by: str,
+    incident_ref: str,
+    silent: bool = False,
+    s3_adapter: S3StorageAdapter | None = None,
+) -> None:
+    """Atomic hard-delete for spill response. Bypasses all holds."""
+    stmt = select(ConversationThread).where(
+        ConversationThread.id == thread_id,
+        ConversationThread.tenant_id == tenant_id,
+    )
+    result = await session.execute(stmt)
+    thread = result.scalar_one_or_none()
+
+    if thread is None:
+        raise ThreadNotFoundError(thread_id)
+
+    # Collect S3 refs
+    s3_refs: list[str] = []
+    if s3_adapter is not None:
+        s3_stmt = select(ConversationMessage.content_ref).where(
+            ConversationMessage.thread_id == thread_id,
+            ConversationMessage.storage_type == "s3",
+            ConversationMessage.content_ref.isnot(None),
+        )
+        s3_result = await session.execute(s3_stmt)
+        s3_refs = [row[0] for row in s3_result.all()]
+
+    # Tombstone (unless silent)
+    if not silent:
+        log_entry = PurgeLog(
+            id=uuid.uuid4(),
+            resource_type="thread",
+            resource_id=thread_id,
+            purged_by=purged_by,
+            reason="spill",
+            incident_ref=incident_ref,
+        )
+        session.add(log_entry)
+
+    # Clear legal hold, delete extractions, delete thread
+    if thread.legal_hold:
+        thread.legal_hold = False
+        await session.flush()
+
+    await session.execute(
+        sa_delete(ConversationExtraction).where(
+            ConversationExtraction.thread_id == thread_id,
+        )
+    )
+    await session.execute(
+        sa_delete(ConversationThread).where(ConversationThread.id == thread_id)
+    )
+
+    await session.commit()
+
+    if s3_refs and s3_adapter is not None:
+        await s3_adapter.delete_contents(s3_refs)
+
+
+async def run_retention_sweep(
+    session: AsyncSession,
+    *,
+    s3_adapter: S3StorageAdapter | None = None,
+) -> dict:
+    """Run the daily retention sweep. Idempotent.
+
+    Phase 1: Soft-delete threads where expires_at <= now() and status='active'.
+    Phase 2: Hard-delete threads where deleted_at + min_retention expired and no legal hold.
+    """
+    now = datetime.now(UTC)
+    summary = {"soft_deleted": 0, "hard_deleted": 0, "skipped_legal_hold": 0}
+
+    # Phase 1: soft-delete expired threads
+    expired_stmt = select(ConversationThread).where(
+        ConversationThread.status == "active",
+        ConversationThread.expires_at.isnot(None),
+        ConversationThread.expires_at <= now,
+    )
+    expired_result = await session.execute(expired_stmt)
+    expired_threads = list(expired_result.scalars().all())
+
+    for thread in expired_threads:
+        try:
+            await soft_delete_thread(
+                session,
+                tenant_id=thread.tenant_id,
+                thread_id=thread.id,
+                purged_by="retention_sweep",
+                reason="retention",
+            )
+            summary["soft_deleted"] += 1
+        except Exception:
+            logger.warning("Failed to soft-delete thread %s", thread.id, exc_info=True)
+
+    # Phase 2: hard-delete threads past min_retention_days
+    deleted_stmt = select(ConversationThread).where(
+        ConversationThread.status == "deleted",
+        ConversationThread.deleted_at.isnot(None),
+        ConversationThread.legal_hold.is_(False),
+    )
+    deleted_result = await session.execute(deleted_stmt)
+    deleted_threads = list(deleted_result.scalars().all())
+
+    for thread in deleted_threads:
+        retention = thread.retention_policy or {}
+        min_days = retention.get("min_retention_days", 30)
+        cutoff = thread.deleted_at + timedelta(days=min_days)
+
+        if now < cutoff:
+            continue
+
+        try:
+            await hard_delete_thread(
+                session,
+                tenant_id=thread.tenant_id,
+                thread_id=thread.id,
+                s3_adapter=s3_adapter,
+            )
+            summary["hard_deleted"] += 1
+        except Exception:
+            logger.warning("Failed to hard-delete thread %s", thread.id, exc_info=True)
+
+    # Count legal hold threads that would otherwise be deleted
+    hold_stmt = select(func.count()).select_from(ConversationThread).where(
+        ConversationThread.status == "pending_deletion",
+        ConversationThread.legal_hold.is_(True),
+    )
+    hold_result = await session.execute(hold_stmt)
+    summary["skipped_legal_hold"] = hold_result.scalar_one()
+
+    return summary
