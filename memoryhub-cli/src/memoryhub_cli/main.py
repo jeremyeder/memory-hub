@@ -2020,7 +2020,6 @@ def thread_list(
     table.add_column("Title")
     table.add_column("Scope")
     table.add_column("Status")
-    table.add_column("Messages", justify="right")
     table.add_column("Created")
 
     for thread in result.threads:
@@ -2031,7 +2030,6 @@ def thread_list(
             title,
             thread.scope,
             thread.status,
-            str(thread.message_count or 0),
             created,
         )
 
