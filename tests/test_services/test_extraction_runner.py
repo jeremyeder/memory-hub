@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -127,3 +127,123 @@ async def test_semaphore_bounds_concurrency():
 
         sem = extraction_runner._get_semaphore()
         assert sem._value == 2
+
+
+@pytest.mark.asyncio
+async def test_determine_failure_status_partial_when_mentions_exist():
+    """Returns 'partial' when MENTIONS relationships exist for the memory."""
+    memory_id = uuid.uuid4()
+
+    mock_result = MagicMock()
+    mock_result.scalar_one.return_value = 3
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    async def mock_get_session():
+        yield mock_session
+
+    with patch("memoryhub_core.services.extraction_runner.get_session", mock_get_session):
+        status = await extraction_runner._determine_failure_status(memory_id)
+
+    assert status == "partial"
+
+
+@pytest.mark.asyncio
+async def test_determine_failure_status_failed_when_no_mentions():
+    """Returns 'failed' when no MENTIONS relationships exist."""
+    memory_id = uuid.uuid4()
+
+    mock_result = MagicMock()
+    mock_result.scalar_one.return_value = 0
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock(return_value=mock_result)
+
+    async def mock_get_session():
+        yield mock_session
+
+    with patch("memoryhub_core.services.extraction_runner.get_session", mock_get_session):
+        status = await extraction_runner._determine_failure_status(memory_id)
+
+    assert status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_run_extraction_uses_partial_on_failure_with_entities():
+    """When extraction fails but entities exist, status is set to 'partial'."""
+    memory_id = uuid.uuid4()
+    mock_session = AsyncMock()
+
+    async def mock_get_session():
+        yield mock_session
+
+    with (
+        patch("memoryhub_core.services.extraction_runner.AppSettings") as mock_settings,
+        patch("memoryhub_core.services.extraction_runner.get_session", mock_get_session),
+        patch(
+            "memoryhub_core.services.extraction_runner.extract_entities_from_memory",
+            side_effect=RuntimeError("extraction failed mid-way"),
+        ),
+        patch(
+            "memoryhub_core.services.extraction_runner._determine_failure_status",
+            new_callable=AsyncMock,
+            return_value="partial",
+        ) as mock_determine,
+        patch(
+            "memoryhub_core.services.extraction_runner._update_extraction_status",
+            new_callable=AsyncMock,
+        ) as mock_update,
+    ):
+        mock_settings.return_value.entity_extraction_concurrency = 5
+
+        await extraction_runner._run_extraction(
+            memory_id=memory_id,
+            content="test content",
+            tenant_id="test-tenant",
+            owner_id="test-user",
+            embedding_service=AsyncMock(),
+        )
+
+    mock_determine.assert_called_once_with(memory_id)
+    mock_update.assert_called_once_with(memory_id, "partial")
+
+
+@pytest.mark.asyncio
+async def test_run_extraction_uses_failed_on_failure_without_entities():
+    """When extraction fails and no entities exist, status is set to 'failed'."""
+    memory_id = uuid.uuid4()
+    mock_session = AsyncMock()
+
+    async def mock_get_session():
+        yield mock_session
+
+    with (
+        patch("memoryhub_core.services.extraction_runner.AppSettings") as mock_settings,
+        patch("memoryhub_core.services.extraction_runner.get_session", mock_get_session),
+        patch(
+            "memoryhub_core.services.extraction_runner.extract_entities_from_memory",
+            side_effect=RuntimeError("extraction failed"),
+        ),
+        patch(
+            "memoryhub_core.services.extraction_runner._determine_failure_status",
+            new_callable=AsyncMock,
+            return_value="failed",
+        ) as mock_determine,
+        patch(
+            "memoryhub_core.services.extraction_runner._update_extraction_status",
+            new_callable=AsyncMock,
+        ) as mock_update,
+    ):
+        mock_settings.return_value.entity_extraction_concurrency = 5
+
+        await extraction_runner._run_extraction(
+            memory_id=memory_id,
+            content="test content",
+            tenant_id="test-tenant",
+            owner_id="test-user",
+            embedding_service=AsyncMock(),
+        )
+
+    mock_determine.assert_called_once_with(memory_id)
+    mock_update.assert_called_once_with(memory_id, "failed")

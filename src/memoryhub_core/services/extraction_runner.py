@@ -54,6 +54,31 @@ async def _update_extraction_status(
         break
 
 
+async def _determine_failure_status(memory_id: uuid.UUID) -> str:
+    """Return 'partial' if the memory has MENTIONS relationships, else 'failed'.
+
+    Uses a separate DB session since the extraction session may be in a
+    bad state after the error.
+    """
+    from sqlalchemy import func, select
+
+    from memoryhub_core.models.memory import MemoryRelationship
+
+    async for session in get_session():
+        stmt = (
+            select(func.count())
+            .select_from(MemoryRelationship)
+            .where(
+                MemoryRelationship.source_id == memory_id,
+                MemoryRelationship.relationship_type == "mentions",
+            )
+        )
+        count = (await session.execute(stmt)).scalar_one()
+        break
+
+    return "partial" if count > 0 else "failed"
+
+
 async def _run_extraction(
     memory_id: uuid.UUID,
     content: str,
@@ -92,10 +117,11 @@ async def _run_extraction(
                 exc_info=True,
             )
             try:
-                await _update_extraction_status(memory_id, "failed")
+                status = await _determine_failure_status(memory_id)
+                await _update_extraction_status(memory_id, status)
             except Exception:
                 logger.warning(
-                    "Failed to update extraction_status to 'failed' for memory %s",
+                    "Failed to update extraction_status for memory %s",
                     memory_id,
                     exc_info=True,
                 )

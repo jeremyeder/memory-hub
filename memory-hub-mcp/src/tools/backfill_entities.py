@@ -36,6 +36,9 @@ async def backfill_entities(
             status_conditions.append(
                 MemoryNode.metadata_["extraction_status"].astext == "failed",
             )
+            status_conditions.append(
+                MemoryNode.metadata_["extraction_status"].astext == "partial",
+            )
 
         base_where = [
             MemoryNode.deleted_at.is_(None),
