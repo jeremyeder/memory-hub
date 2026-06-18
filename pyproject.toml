@@ -20,12 +20,14 @@ dependencies = [
     "redis>=5.0",
     "httpx",
     "psycopg2-binary",
-    "spacy>=3.7",
-    "gliner>=0.2.7",
     "pyyaml",
 ]
 
 [project.optional-dependencies]
+extraction = [
+    "spacy>=3.7",
+    "gliner>=0.2.7",
+]
 dev = [
     "pytest",
     "pytest-asyncio>=0.24",
