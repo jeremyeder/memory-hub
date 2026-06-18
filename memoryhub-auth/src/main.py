@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from src.config import settings
 from src.errors import OAuthError
 from src.keys import load_keys
-from src.routes import admin, authorize, health, openshift_callback, token, well_known
+from src.routes import admin, authorize, health, internal, openshift_callback, token, well_known
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +48,7 @@ app.include_router(openshift_callback.router)
 app.include_router(well_known.router)
 app.include_router(health.router)
 app.include_router(admin.router)
+app.include_router(internal.router)
 
 
 def main():

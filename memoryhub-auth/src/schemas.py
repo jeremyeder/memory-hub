@@ -36,8 +36,26 @@ class ClientResponse(BaseModel):
 
 class ClientCreatedResponse(ClientResponse):
     client_secret: str  # plaintext, shown once
+    api_key: str  # plaintext, shown once
 
 
 class SecretRotatedResponse(BaseModel):
     client_id: str
     client_secret: str  # plaintext, shown once
+
+
+class ApiKeyRotatedResponse(BaseModel):
+    client_id: str
+    api_key: str
+
+
+class ValidateApiKeyRequest(BaseModel):
+    api_key: str
+
+
+class ValidateApiKeyResponse(BaseModel):
+    user_id: str
+    name: str
+    identity_type: str
+    tenant_id: str
+    scopes: list[str]

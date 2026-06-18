@@ -220,6 +220,56 @@ class TestUpdateClient:
 
 
 @pytest.mark.asyncio
+class TestCreateClientApiKey:
+    async def test_create_includes_api_key(self, client):
+        body = {
+            "client_id": "apikey-agent",
+            "client_name": "API Key Agent",
+            "tenant_id": "tenant-1",
+        }
+        resp = await client.post(
+            "/admin/clients", json=body, headers=ADMIN_HEADERS
+        )
+        assert resp.status_code == 201, resp.text
+        data = resp.json()
+        assert "api_key" in data, "Response should include api_key"
+        assert data["api_key"].startswith("mh-dev-"), (
+            f"API key should start with 'mh-dev-', got: {data['api_key']}"
+        )
+
+    async def test_api_key_not_in_get(self, client, sample_client):
+        resp = await client.get(
+            "/admin/clients/test-agent", headers=ADMIN_HEADERS
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert "api_key" not in data, "GET should not expose api_key"
+
+
+@pytest.mark.asyncio
+class TestRotateApiKey:
+    async def test_rotate_api_key(self, client, sample_client):
+        resp = await client.post(
+            "/admin/clients/test-agent/rotate-api-key",
+            headers=ADMIN_HEADERS,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["client_id"] == "test-agent"
+        assert "api_key" in data
+        assert data["api_key"].startswith("mh-dev-"), (
+            f"Rotated API key should start with 'mh-dev-', got: {data['api_key']}"
+        )
+
+    async def test_rotate_api_key_not_found(self, client):
+        resp = await client.post(
+            "/admin/clients/no-such-agent/rotate-api-key",
+            headers=ADMIN_HEADERS,
+        )
+        assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.asyncio
 class TestRotateSecret:
     async def test_rotate_returns_new_secret(self, client, sample_client):
         resp = await client.post(

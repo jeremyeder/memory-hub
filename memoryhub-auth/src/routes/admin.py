@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 import secrets
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database import get_session
 from src.models import OAuthClient
 from src.schemas import (
+    ApiKeyRotatedResponse,
     ClientCreatedResponse,
     ClientResponse,
     CreateClientRequest,
@@ -80,6 +82,9 @@ async def create_client(
         plaintext_secret.encode(), bcrypt.gensalt()
     ).decode()
 
+    api_key = "mh-dev-" + secrets.token_hex(8)
+    api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+
     now = datetime.now(UTC)
     client = OAuthClient(
         client_id=body.client_id,
@@ -93,6 +98,7 @@ async def create_client(
         active=True,
         created_at=now,
         updated_at=now,
+        api_key_hash=api_key_hash,
     )
     session.add(client)
     await session.commit()
@@ -112,6 +118,7 @@ async def create_client(
         created_at=client.created_at,
         updated_at=client.updated_at,
         client_secret=plaintext_secret,
+        api_key=api_key,
     )
 
 
@@ -188,3 +195,27 @@ async def rotate_secret(
         client_id=client.client_id,
         client_secret=plaintext_secret,
     )
+
+
+@router.post(
+    "/clients/{client_id}/rotate-api-key",
+    dependencies=[Depends(require_admin_key)],
+)
+async def rotate_api_key(
+    client_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> ApiKeyRotatedResponse:
+    result = await session.execute(
+        select(OAuthClient).where(OAuthClient.client_id == client_id)
+    )
+    client = result.scalar_one_or_none()
+    if client is None:
+        raise HTTPException(status_code=404, detail=f"Client '{client_id}' not found")
+
+    api_key = "mh-dev-" + secrets.token_hex(8)
+    client.api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    client.updated_at = datetime.now(UTC)
+    await session.commit()
+
+    log.info("Rotated API key for client %s", client_id)
+    return ApiKeyRotatedResponse(client_id=client.client_id, api_key=api_key)
