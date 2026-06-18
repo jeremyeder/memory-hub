@@ -13,9 +13,11 @@ MEMORYHUB_USERS_JSON (inline JSON string), falling back to
 /config/users.json for OpenShift (mounted from the memoryhub-users ConfigMap).
 """
 
+import hashlib
 import json
 import logging
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -30,6 +32,11 @@ _session_id: str | None = None
 # Loaded user records keyed by api_key for O(1) lookup.
 _users_by_key: dict[str, dict[str, Any]] = {}
 _users_loaded = False
+
+# Cache for remote (auth-service) API key validations, keyed by SHA-256
+# hash of the key.  Each entry is (user_dict, expiry_timestamp).
+_remote_key_cache: dict[str, tuple[dict[str, Any], float]] = {}
+_CACHE_TTL = 300  # 5 minutes
 
 
 def _load_users() -> None:
@@ -86,6 +93,55 @@ def authenticate(api_key: str) -> dict[str, Any] | None:
     """Validate an API key and return the user record, or None if invalid."""
     _load_users()
     return _users_by_key.get(api_key)
+
+
+async def authenticate_remote(api_key: str) -> dict[str, Any] | None:
+    """Validate an API key via the auth service (fallback for keys not in ConfigMap)."""
+    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+    cached = _remote_key_cache.get(key_hash)
+    if cached is not None:
+        user_dict, expiry = cached
+        if time.time() < expiry:
+            return user_dict
+        del _remote_key_cache[key_hash]
+
+    validate_url = os.environ.get("AUTH_API_KEY_VALIDATE_URL")
+    if not validate_url:
+        issuer = os.environ.get("AUTH_ISSUER")
+        if issuer:
+            validate_url = f"{issuer.rstrip('/')}/internal/validate-api-key"
+    if not validate_url:
+        return None
+
+    service_key = os.environ.get("AUTH_INTERNAL_SERVICE_KEY", "")
+    if not service_key:
+        logger.warning("AUTH_INTERNAL_SERVICE_KEY not set; remote API key validation unavailable")
+        return None
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(
+                validate_url,
+                json={"api_key": api_key},
+                headers={"X-Service-Key": service_key},
+            )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        user_dict = {
+            "user_id": data["user_id"],
+            "name": data["name"],
+            "identity_type": data.get("identity_type", "user"),
+            "tenant_id": data.get("tenant_id", "default"),
+            "scopes": data["scopes"],
+        }
+        _remote_key_cache[key_hash] = (user_dict, time.time() + _CACHE_TTL)
+        return user_dict
+    except Exception as exc:
+        logger.warning("Auth service API key validation failed: %s", exc)
+        return None
 
 
 def set_session_id(sid: str) -> None:

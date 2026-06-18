@@ -35,7 +35,7 @@ from memoryhub_core.services.valkey_client import (
 from src.core.app import mcp
 from src.core.authz import get_tenant_filter
 from src.tools._deps import get_db_session, release_db_session
-from src.tools.auth import authenticate, set_session, set_session_id
+from src.tools.auth import authenticate, authenticate_remote, set_session, set_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +222,8 @@ async def register_session(
         }
 
     user = authenticate(api_key)
+    if user is None:
+        user = await authenticate_remote(api_key)
 
     if user is None:
         raise ToolError(

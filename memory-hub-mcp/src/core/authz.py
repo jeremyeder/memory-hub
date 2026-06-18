@@ -113,12 +113,18 @@ def get_claims_from_context() -> dict:
     # 3. Fall back to session
     user = get_current_user()
     if user is not None:
-        access_tiers = user.get("scopes", [])
+        raw_scopes = user.get("scopes", [])
+        # Auth-service users already have OAuth-format scopes (contain ':').
+        # ConfigMap users have tier names that need expansion.
+        if raw_scopes and any(":" in s for s in raw_scopes):
+            scopes = raw_scopes
+        else:
+            scopes = _normalize_session_scopes(raw_scopes)
         claims = {
             "sub": user["user_id"],
             "identity_type": user.get("identity_type", "user"),
-            "tenant_id": "default",
-            "scopes": _normalize_session_scopes(access_tiers),
+            "tenant_id": user.get("tenant_id", "default"),
+            "scopes": scopes,
         }
         log.debug("Resolved session identity: sub=%s", claims["sub"])
         return claims
