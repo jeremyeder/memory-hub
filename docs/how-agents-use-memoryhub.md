@@ -196,7 +196,7 @@ This decoupling is important because it means you can start with the inline path
 
 ### At inference time, provenance disappears
 
-Here's the thing that clarifies most of the confusion: at inference time, none of these distinctions matter to the model. The LLM receives a JSON payload containing a system prompt and a conversation history. Every piece of context -- whether it came from MemoryHub, a RAG retrieval, a Salesforce query, CLAUDE.md, or a user message -- is just tokens in that payload. The model doesn't know or care where a token came from.
+At inference time, none of the distinctions above matter to the model. The LLM receives a JSON payload containing a system prompt and a conversation history. Every piece of context -- whether it came from MemoryHub, a RAG retrieval, a Salesforce query, CLAUDE.md, or a user message -- is just tokens in that payload. The model doesn't know or care where a token came from.
 
 Provenance only matters if the developer chooses to signal it. When MemoryHub injects a `<memoryhub-context>` block, the agent can see that those tokens came from MemoryHub (because they're wrapped in a tag). When a Salesforce integration returns data in a `<salesforce_data>` block, the agent knows the source. But this is a developer choice, not a model capability. If you pasted the same text without the tags, the model would process it identically.
 
@@ -208,6 +208,8 @@ This means the real question isn't "where should I store this?" but "how should 
 - Business system data is fetched when the agent needs it for a specific operation.
 
 Each store has its own retrieval path into the context window. MemoryHub's path is: hook at session start (broad, semantic search) plus tool calls mid-session (targeted, on pivot). That path is optimized for experiential context -- things the agent learned that it doesn't know it'll need until a conversation makes them relevant.
+
+For a concrete walkthrough showing how all of these sources get assembled into the actual JSON that goes to the LLM -- with code blocks for each source and the final API request -- see [Context Assembly at Inference Time](context-assembly-at-inference.md).
 
 ### The practical test
 
