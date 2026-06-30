@@ -580,15 +580,6 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
 
 # ---------------------------------------------------------------------------
 # Client management (proxy to auth service admin API)
-#
-# Phase 6 (#46) note: the /api/clients/* routes deliberately remain
-# unscoped by tenant because they proxy verbatim to the auth service's
-# /admin/clients API, which is itself not yet tenant-scoped. The auth
-# admin API is a separate design concern (tracked as Phase 6 follow-up)
-# and tenant scoping it there is out of scope for the BFF work. If/when
-# the auth service grows a tenant filter, the BFF's ui_tenant_id should
-# be forwarded in the _admin_request call so operators only see their
-# own tenant's clients.
 # ---------------------------------------------------------------------------
 
 
@@ -647,13 +638,8 @@ async def list_users(db: DbDep, settings: SettingsDep):
     """List all identities with memory counts and last active times.
 
     Merges OAuth client data from auth service with memory stats from DB.
-
-    Phase 6 (#46): the local memory_nodes aggregation is tenant-scoped by
-    ``settings.ui_tenant_id`` so owners only appear with the memory
-    counts from their own tenant. The auth service /admin/clients proxy
-    portion is NOT tenant-scoped yet -- same caveat as /api/clients --
-    so the merged roster may still show clients that have not written
-    anything in this tenant (they'll appear with memory_count=0).
+    Both the local memory_nodes aggregation and the auth service client
+    list are tenant-scoped by ``settings.ui_tenant_id`` (#105).
     """
     tenant_id = settings.ui_tenant_id
 
