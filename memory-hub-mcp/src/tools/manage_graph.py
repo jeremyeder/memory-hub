@@ -37,7 +37,7 @@ from src.core.authz import (
     get_claims_from_context,
     get_tenant_filter,
 )
-from src.tools._deps import get_db_session, release_db_session
+from src.tools._deps import get_db_session, release_db_session, resolve_driver_id
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +331,10 @@ async def _handle_create_relationship(
         raise ToolError(
             "source_id and target_id must be different — self-referential edges are not allowed."
         )
+
+    # Resolve actor/driver identity for audit trail.
+    actor_id = claims["sub"]
+    resolved_driver = resolve_driver_id(None, claims)
 
     if ctx:
         await ctx.info(

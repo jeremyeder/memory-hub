@@ -36,6 +36,7 @@ from src.tools._deps import (
     get_embedding_service,
     get_s3_adapter,
     release_db_session,
+    resolve_driver_id,
 )
 from src.tools._push_helpers import broadcast_after_write
 
@@ -178,6 +179,16 @@ async def write_memory(
             ),
         ),
     ] = None,
+    driver_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Identity of the upstream human or system driving this write. "
+                "Omit to use the session default (set at register_session time) "
+                "or the authenticated actor_id if no default is set."
+            ),
+        ),
+    ] = None,
     ctx: Context = None,
 ) -> dict[str, Any]:
     """Create a new memory node or branch in the memory tree.
@@ -279,6 +290,10 @@ async def write_memory(
             f"Not authorized to write {scope}-scope memory for owner '{owner_id}'."
         )
 
+    # Resolve actor/driver identity for audit trail.
+    actor_id = claims["sub"]
+    resolved_driver = resolve_driver_id(driver_id, claims)
+
     # Validate branch_type / parent_id pairing in both directions:
     # - parent_id without branch_type: branch with no kind label
     # - branch_type without parent_id: orphan branch with no parent to attach to
@@ -311,6 +326,8 @@ async def write_memory(
             scope=scope,
             weight=weight,
             owner_id=owner_id,
+            actor_id=actor_id,
+            driver_id=resolved_driver,
             parent_id=parsed_parent_id,
             branch_type=branch_type,
             metadata=metadata,

@@ -34,7 +34,7 @@ from src.core.authz import (
     get_claims_from_context,
     get_tenant_filter,
 )
-from src.tools._deps import get_db_session, get_s3_adapter, release_db_session
+from src.tools._deps import get_db_session, get_s3_adapter, release_db_session, resolve_driver_id
 from src.tools._push_helpers import broadcast_after_write
 
 
@@ -64,6 +64,16 @@ async def delete_memory(
             description=(
                 "Your project identifier. Required when deleting a campaign-scoped "
                 "memory — used to verify your project is enrolled in the campaign."
+            ),
+        ),
+    ] = None,
+    driver_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Identity of the upstream human or system driving this delete. "
+                "Omit to use the session default or the authenticated actor_id. "
+                "Recorded in the audit log."
             ),
         ),
     ] = None,
@@ -160,6 +170,10 @@ async def delete_memory(
                 f"Not authorized to delete this {existing.scope}-scope memory. "
                 "You need either ownership of the memory or the memory:admin scope."
             )
+
+        # Resolve actor/driver identity for audit trail.
+        actor_id = claims["sub"]
+        resolved_driver = resolve_driver_id(driver_id, claims)
 
         if ctx:
             await ctx.info(f"Deleting memory {memory_id}")
