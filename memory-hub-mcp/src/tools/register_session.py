@@ -33,6 +33,7 @@ from memoryhub_core.services.valkey_client import (
     get_valkey_client,
 )
 from src.core.app import mcp
+from src.core.audit import record_event
 from src.core.authz import get_tenant_filter
 from src.tools._deps import get_db_session, release_db_session
 from src.tools.auth import (
@@ -227,6 +228,16 @@ async def register_session(
         tenant = get_tenant_filter(jwt_claims)
         await _start_push_for_session(session_id, ctx)
         projects = await _fetch_user_projects(user_id, tenant)
+        record_event(
+            event_type="session.registered",
+            actor_id=user_id,
+            driver_id=default_driver_id or user_id,
+            scope="session",
+            owner_id=user_id,
+            memory_id=None,
+            decision="allowed",
+            metadata={"auth_method": "jwt", "session_id": session_id},
+        )
         return {
             "session_id": session_id,
             "user_id": user_id,
@@ -254,6 +265,16 @@ async def register_session(
             ) from exc
 
     if user is None:
+        record_event(
+            event_type="session.denied",
+            actor_id="unknown",
+            driver_id="unknown",
+            scope="session",
+            owner_id="unknown",
+            memory_id=None,
+            decision="denied",
+            metadata={"auth_method": "api_key"},
+        )
         raise ToolError(
             "Invalid API key. Contact your system administrator for a valid key. "
             "Keys follow the format: mh-dev-<hex>."
@@ -274,6 +295,17 @@ async def register_session(
         {"sub": user["user_id"], "tenant_id": user.get("tenant_id", "default")}
     )
     projects = await _fetch_user_projects(user["user_id"], tenant)
+
+    record_event(
+        event_type="session.registered",
+        actor_id=user["user_id"],
+        driver_id=default_driver_id or user["user_id"],
+        scope="session",
+        owner_id=user["user_id"],
+        memory_id=None,
+        decision="allowed",
+        metadata={"auth_method": "api_key", "session_id": session_id},
+    )
 
     return {
         "session_id": session_id,

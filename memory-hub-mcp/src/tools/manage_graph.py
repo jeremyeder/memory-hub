@@ -31,6 +31,7 @@ from memoryhub_core.services.memory import read_memory as read_memory_service
 from memoryhub_core.services.project import get_projects_for_user
 from memoryhub_core.services.role import get_roles_for_user
 from src.core.app import mcp
+from src.core.audit import record_event
 from src.core.authz import (
     AuthenticationError,
     authorize_read,
@@ -366,6 +367,17 @@ async def _handle_create_relationship(
             campaign_ids = await get_campaigns_for_project(session, project_id, tenant)
         if not authorize_read(claims, node, campaign_ids=campaign_ids):
             raise ToolError(f"Not authorized to access {label} ({node_id_parsed}).")
+
+    record_event(
+        event_type="memory.relationship_created",
+        actor_id=actor_id,
+        driver_id=resolved_driver,
+        scope="graph",
+        owner_id=claims["sub"],
+        memory_id=source_id,
+        decision="allowed",
+        metadata={"target_id": target_id, "relationship_type": relationship_type},
+    )
 
     try:
         rel_create = RelationshipCreate(
