@@ -81,7 +81,7 @@ class MemoryNode(TimestampMixin, Base):
     #   quarantined  - visible only to admin queries
     #   soft_deleted - visible only when explicitly requested
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="active", index=True,
+        String(20), nullable=False, server_default="active",
     )
 
     # Content-addressed entity IDs for deduplication (#247)
