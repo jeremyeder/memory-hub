@@ -197,6 +197,12 @@ async def create_memory(
         updated_at=now,
     )
 
+    # Run temporal classifier when caller didn't set relevant_until explicitly.
+    if node.relevant_until is None:
+        from memoryhub_core.services.temporal import classify_temporal
+
+        node.relevant_until = classify_temporal(data.content, now)
+
     session.add(node)
     await session.commit()
     await session.refresh(node)
@@ -475,6 +481,14 @@ async def update_memory(
         db_content = old_node.content
         storage_type = old_node.storage_type
 
+    # Recompute relevant_until when content changes; inherit from old node otherwise.
+    if content_changed:
+        from memoryhub_core.services.temporal import classify_temporal
+
+        new_relevant_until = classify_temporal(new_content, now)
+    else:
+        new_relevant_until = old_node.relevant_until
+
     new_node = MemoryNode(
         id=new_id,
         content=db_content,
@@ -490,6 +504,7 @@ async def update_memory(
         branch_type=old_node.branch_type,
         metadata_=new_metadata,
         domains=new_domains,
+        relevant_until=new_relevant_until,
         embedding=embedding,
         is_current=True,
         version=old_node.version + 1,
