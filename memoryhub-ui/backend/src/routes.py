@@ -88,12 +88,18 @@ async def _admin_request(
     method: str,
     path: str,
     json_body: dict | None = None,
+    tenant_id: str | None = None,
 ) -> httpx.Response:
     """Make an authenticated request to the auth service admin API."""
     url = f"{settings.auth_service_url}{path}"
     headers = {"X-Admin-Key": settings.admin_key}
+    params: dict[str, str] = {}
+    if tenant_id is not None:
+        params["tenant_id"] = tenant_id
     async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.request(method, url, headers=headers, json=json_body)
+        response = await client.request(
+            method, url, headers=headers, json=json_body, params=params
+        )
     if response.status_code >= 400:
         try:
             detail = response.json().get("detail", response.text)
@@ -574,46 +580,51 @@ async def delete_memory(memory_id: str, db: DbDep, settings: SettingsDep):
 
 # ---------------------------------------------------------------------------
 # Client management (proxy to auth service admin API)
-#
-# Phase 6 (#46) note: the /api/clients/* routes deliberately remain
-# unscoped by tenant because they proxy verbatim to the auth service's
-# /admin/clients API, which is itself not yet tenant-scoped. The auth
-# admin API is a separate design concern (tracked as Phase 6 follow-up)
-# and tenant scoping it there is out of scope for the BFF work. If/when
-# the auth service grows a tenant filter, the BFF's ui_tenant_id should
-# be forwarded in the _admin_request call so operators only see their
-# own tenant's clients.
 # ---------------------------------------------------------------------------
 
 
 @router.get("/api/clients", response_model=list[ClientResponse])
 async def list_clients(settings: SettingsDep):
-    resp = await _admin_request(settings, "GET", "/admin/clients")
+    resp = await _admin_request(
+        settings, "GET", "/admin/clients", tenant_id=settings.ui_tenant_id
+    )
     return resp.json()
 
 
 @router.post("/api/clients", response_model=ClientCreatedResponse, status_code=201)
 async def create_client(body: CreateClientRequest, settings: SettingsDep):
-    resp = await _admin_request(settings, "POST", "/admin/clients", json_body=body.model_dump())
+    resp = await _admin_request(
+        settings, "POST", "/admin/clients",
+        json_body=body.model_dump(), tenant_id=settings.ui_tenant_id,
+    )
     return resp.json()
 
 
 @router.patch("/api/clients/{client_id}", response_model=ClientResponse)
 async def update_client(client_id: str, body: UpdateClientRequest, settings: SettingsDep):
     payload = body.model_dump(exclude_none=True)
-    resp = await _admin_request(settings, "PATCH", f"/admin/clients/{client_id}", json_body=payload)
+    resp = await _admin_request(
+        settings, "PATCH", f"/admin/clients/{client_id}",
+        json_body=payload, tenant_id=settings.ui_tenant_id,
+    )
     return resp.json()
 
 
 @router.post("/api/clients/{client_id}/rotate-secret", response_model=SecretRotatedResponse)
 async def rotate_client_secret(client_id: str, settings: SettingsDep):
-    resp = await _admin_request(settings, "POST", f"/admin/clients/{client_id}/rotate-secret")
+    resp = await _admin_request(
+        settings, "POST", f"/admin/clients/{client_id}/rotate-secret",
+        tenant_id=settings.ui_tenant_id,
+    )
     return resp.json()
 
 
 @router.post("/api/clients/{client_id}/rotate-api-key", response_model=ApiKeyRotatedResponse)
 async def rotate_api_key(client_id: str, settings: SettingsDep):
-    resp = await _admin_request(settings, "POST", f"/admin/clients/{client_id}/rotate-api-key")
+    resp = await _admin_request(
+        settings, "POST", f"/admin/clients/{client_id}/rotate-api-key",
+        tenant_id=settings.ui_tenant_id,
+    )
     return resp.json()
 
 
@@ -627,13 +638,8 @@ async def list_users(db: DbDep, settings: SettingsDep):
     """List all identities with memory counts and last active times.
 
     Merges OAuth client data from auth service with memory stats from DB.
-
-    Phase 6 (#46): the local memory_nodes aggregation is tenant-scoped by
-    ``settings.ui_tenant_id`` so owners only appear with the memory
-    counts from their own tenant. The auth service /admin/clients proxy
-    portion is NOT tenant-scoped yet -- same caveat as /api/clients --
-    so the merged roster may still show clients that have not written
-    anything in this tenant (they'll appear with memory_count=0).
+    Both the local memory_nodes aggregation and the auth service client
+    list are tenant-scoped by ``settings.ui_tenant_id`` (#105).
     """
     tenant_id = settings.ui_tenant_id
 
@@ -660,7 +666,9 @@ async def list_users(db: DbDep, settings: SettingsDep):
     # Try to get client list from auth service
     clients = []
     try:
-        resp = await _admin_request(settings, "GET", "/admin/clients")
+        resp = await _admin_request(
+            settings, "GET", "/admin/clients", tenant_id=settings.ui_tenant_id
+        )
         clients = resp.json()
     except Exception:
         logger.warning("Could not fetch clients from auth service, using DB owner_ids only")
