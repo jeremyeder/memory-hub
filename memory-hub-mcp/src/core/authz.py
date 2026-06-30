@@ -125,6 +125,7 @@ def get_claims_from_context() -> dict:
             "identity_type": user.get("identity_type", "user"),
             "tenant_id": user.get("tenant_id", "default"),
             "scopes": scopes,
+            "project_memberships": user.get("project_memberships", []),
         }
         log.debug("Resolved session identity: sub=%s", claims["sub"])
         return claims
