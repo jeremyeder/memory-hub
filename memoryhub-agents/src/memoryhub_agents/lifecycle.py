@@ -39,10 +39,10 @@ class AgentPlugin(ABC):
     async def process(self, item: dict, mcp: MCPSession) -> dict:
         """Process a single work item. Returns a result dict."""
 
-    async def on_start(self, config: AgentConfig, mcp: MCPSession) -> None:
+    async def on_start(self, config: AgentConfig, mcp: MCPSession) -> None:  # noqa: B027
         """Called once after authentication succeeds."""
 
-    async def on_stop(self) -> None:
+    async def on_stop(self) -> None:  # noqa: B027
         """Called during graceful shutdown."""
 
 

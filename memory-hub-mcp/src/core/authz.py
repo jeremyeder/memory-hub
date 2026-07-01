@@ -215,9 +215,7 @@ def authorize_write(
         if owner_id == claims["sub"]:
             return True
         # OBO: service agents can write to any user's scope (#284)
-        if claims.get("identity_type") == "service":
-            return True
-        return False
+        return claims.get("identity_type") == "service"
     if scope == "enterprise":
         return False  # always rejected; HITL approval flow bypasses
     if scope == "organizational":

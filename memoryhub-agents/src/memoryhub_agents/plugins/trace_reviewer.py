@@ -10,7 +10,7 @@ unavailable: expects thread content in the work item payload.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from memoryhub_agents.config import AgentConfig
 from memoryhub_agents.lifecycle import AgentPlugin

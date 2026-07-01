@@ -353,7 +353,8 @@ async def write_memory(
     # Parse relevant_until string to datetime if provided.
     parsed_relevant_until = None
     if relevant_until is not None:
-        from datetime import datetime as dt, UTC as _UTC
+        from datetime import UTC as _UTC
+        from datetime import datetime as dt
 
         try:
             parsed_relevant_until = dt.fromisoformat(relevant_until)

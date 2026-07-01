@@ -19,7 +19,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from memoryhub_core.models.memory import MemoryNode, MemoryRelationship
