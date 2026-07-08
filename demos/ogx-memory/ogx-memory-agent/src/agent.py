@@ -26,7 +26,18 @@ PROJECT_ID = "ogx-memory-demo"
 
 
 class OGXMemoryAgent(BaseAgent):
-    """Agent with MemoryHub via client-side MCP."""
+    """Agent with MemoryHub via client-side MCP.
+
+    Overrides setup to patch the LLM client's model name. The fipsagents
+    framework strips 'vllm/' from model names, but OGX registers models
+    with that prefix. This patches the model name back to include it.
+    """
+
+    async def setup(self) -> None:
+        await super().setup()
+        raw_name = os.environ.get("OGX_MODEL_NAME", "")
+        if raw_name and hasattr(self, "llm") and hasattr(self.llm, "_config"):
+            self.llm._config.name = raw_name
 
     async def step(self) -> StepResult:
         response = await self.call_model()
