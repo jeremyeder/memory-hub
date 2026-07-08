@@ -368,22 +368,25 @@ async def write_memory(
             ) from None
 
     # Build the create schema with validation
+    # Only pass content_type if explicitly provided; let Pydantic default apply
+    create_kwargs = dict(
+        content=content,
+        scope=scope,
+        weight=weight,
+        owner_id=owner_id,
+        actor_id=actor_id,
+        driver_id=resolved_driver,
+        parent_id=parsed_parent_id,
+        branch_type=branch_type,
+        metadata=metadata,
+        domains=domains,
+        scope_id=scope_id_value,
+        relevant_until=parsed_relevant_until,
+    )
+    if content_type is not None:
+        create_kwargs["content_type"] = content_type
     try:
-        node_create = MemoryNodeCreate(
-            content=content,
-            scope=scope,
-            weight=weight,
-            owner_id=owner_id,
-            actor_id=actor_id,
-            driver_id=resolved_driver,
-            parent_id=parsed_parent_id,
-            branch_type=branch_type,
-            metadata=metadata,
-            domains=domains,
-            scope_id=scope_id_value,
-            content_type=content_type,
-            relevant_until=parsed_relevant_until,
-        )
+        node_create = MemoryNodeCreate(**create_kwargs)
     except ValidationError as exc:
         errors = exc.errors()
         messages = [f"  - {e['loc'][-1]}: {e['msg']}" for e in errors]
