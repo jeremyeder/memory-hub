@@ -2,7 +2,7 @@
 
 The MCP server is the sole external interface to MemoryHub. Every agent interaction -- reading, writing, searching, versioning -- goes through MCP tools. There is no REST API, no direct database access, no alternative path. This simplifies security (one interface to secure) and governance (one interface to audit).
 
-**Status: implemented.** Compact profile (default): 2 tools (`register_session` + `memory` action-dispatch with 19 actions, #201/#202). Full profile: 10 flat-parameter tools available via `MEMORYHUB_TOOL_PROFILE=full`. Old 10 tools retained as deprecated aliases during migration. Deployed on OpenShift via streamable-http transport. Layer 1 (response shape, #56/#57) and Layer 2 (session focus retrieval, #58) of the agent-memory-ergonomics work are both shipped. Tool consolidation (#173/#174) merged `suggest_merge` into `create_relationship` and `get_memory_history` into `read_memory`. See `memory-hub-mcp/TOOLS_PLAN.md` for the full tool specifications and [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) for the design behind the search-memory parameters.
+**Status: implemented.** Compact profile (default): 2 tools (`register_session` + `memory` action-dispatch with 19 actions, #201/#202). Full profile: 10 flat-parameter tools available via `MEMORYHUB_TOOL_PROFILE=full`. Old 10 tools retained as deprecated aliases during migration. Deployed on OpenShift via streamable-http transport. Layer 1 (response shape, #56/#57) and Layer 2 (session focus retrieval, #58) of the agent-memory-ergonomics work are both shipped. Tool consolidation (#173/#174) merged `suggest_merge` into `create_relationship` and `get_memory_history` into `read_memory`. See `memory-hub-mcp/TOOLS_PLAN.md` for the full tool specifications and [`agent-memory-ergonomics/design.md`](../agent-memory-ergonomics/design.md) for the design behind the search-memory parameters.
 
 ## Transport and Deployment
 
@@ -86,7 +86,7 @@ Focus is fully optional. When `focus` is omitted (or `session_focus_weight ≤ 0
 
 The cross-encoder is graceful-fallback: if `MEMORYHUB_RERANKER_URL` is unset or unreachable, the response carries a `focus_fallback_reason` field documenting the fallback and ranking falls back to pure cosine. The system stays usable even when the reranker pod is unhealthy.
 
-Empirical benchmark methodology and the four-way comparison (NEW-1 RRF blend vs NEW-2 focus-augmented query vs NEW-3 rerank-only vs cosine baseline) live in [`research/agent-memory-ergonomics/two-vector-retrieval.md`](../research/agent-memory-ergonomics/two-vector-retrieval.md). NEW-1 won; NEW-2 was eliminated for catastrophic cross-topic recall collapse; NEW-3 alone was neutral on the synthetic corpus.
+Empirical benchmark methodology and the four-way comparison (NEW-1 RRF blend vs NEW-2 focus-augmented query vs NEW-3 rerank-only vs cosine baseline) live in [`research/agent-memory-ergonomics/two-vector-retrieval.md`](../../research/agent-memory-ergonomics/two-vector-retrieval.md). NEW-1 won; NEW-2 was eliminated for catastrophic cross-topic recall collapse; NEW-3 alone was neutral on the synthetic corpus.
 
 ## Campaign scope and domain tagging (#154)
 
@@ -107,7 +107,7 @@ Campaign membership is resolved via `get_campaigns_for_project()` in the service
 
 ## Authentication
 
-The MCP server is a **resource server** in OAuth 2.1 terms — it validates JWTs but does not issue them. A separate OAuth 2.1 authorization service ([`memoryhub-auth/`](../memoryhub-auth/)) handles token issuance via three grant types: `client_credentials` (agents/SDKs, shipped), `authorization_code` + PKCE (browser-based humans, used by the dashboard via the OpenShift OAuth proxy), and token exchange / RFC 8693 (platform-integrated agents on RHOAI/K8s, designed but not yet wired).
+The MCP server is a **resource server** in OAuth 2.1 terms — it validates JWTs but does not issue them. A separate OAuth 2.1 authorization service ([`memoryhub-auth/`](../../memoryhub-auth)) handles token issuance via three grant types: `client_credentials` (agents/SDKs, shipped), `authorization_code` + PKCE (browser-based humans, used by the dashboard via the OpenShift OAuth proxy), and token exchange / RFC 8693 (platform-integrated agents on RHOAI/K8s, designed but not yet wired).
 
 FastMCP's `JWTVerifier` validates tokens at the transport layer before any tool code executes. Tools access the authenticated identity via `get_claims_from_context()` in `core/authz.py`, which prefers JWT claims when present and falls back to a session shim when the dev-path API key flow is in use. The claims provide `sub` (user ID), `identity_type` (user/service), `tenant_id` (multi-tenant isolation), and `scopes` (operational permissions like `memory:read:user`, `memory:write:project`).
 
@@ -129,7 +129,7 @@ The SDK classifies these messages by prefix into typed exceptions:
 `NotFoundError`, `PermissionDeniedError`, `ValidationError`,
 `AuthenticationError`, `ConflictError`, and `CurationVetoError`.
 
-See [`planning/tool-error-standardization.md`](../planning/tool-error-standardization.md) for the full design note.
+See [`planning/tool-error-standardization.md`](../../planning/archive/tool-error-standardization.md) for the full design note.
 
 Generic `except Exception` handlers in tools log at ERROR and scrub internal
 details from the raised `ToolError` message to prevent leaking SQL fragments

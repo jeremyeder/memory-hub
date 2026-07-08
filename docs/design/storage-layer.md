@@ -200,3 +200,70 @@ Both systems' backup data should be encrypted. PostgreSQL backups inherit OS-lev
 - How do we handle embedding model upgrades? If we switch embedding models, all existing vectors need re-computation. Do we store the model identifier alongside the embedding?
 - What's the retention policy for audit logs? Infinite retention is expensive; time-bounded retention loses forensic capability. Tiered storage (hot/warm/cold) for audit data?
 - Connection pooling: does the OOTB operator include PgBouncer, or do we deploy it separately?
+
+## FAQ / Design Rationale
+
+Common questions from colleagues and stakeholders about the storage architecture choices. The mechanics (pgvector fit, recursive CTEs, the Apache AGE evolution path) are covered in the sections above; this section captures the "why not something else" reasoning.
+
+### Why not Neo4j?
+
+Neo4j is an excellent graph database. MemoryHub doesn't use it for three reasons: operational dependency, deployment story, and fitness for purpose.
+
+**Operational dependency.** PostgreSQL ships with OpenShift out of the box. Neo4j is an additional product that enterprises must license (Enterprise Edition for production), deploy as a separate cluster, monitor, back up, and maintain HA for. For regulated enterprises -- MemoryHub's target market -- every dependency is a compliance surface. Adding Neo4j doubles the database operations burden for a capability PostgreSQL already provides.
+
+**Deployment story.** MemoryHub deploys with a single script (`deploy-full.sh`) that stands up everything it needs. Adding Neo4j means a second database cluster, a second backup strategy, a second HA configuration, a second set of credentials to manage. The golden test -- "uninstall and redeploy with zero manual steps" -- gets significantly harder with two database products.
+
+**Fitness for purpose.** Graph databases shine at unknown-depth recursive traversal: supply chains, social networks, fraud detection paths. MemoryHub's memory trees have bounded, shallow depth. The access patterns that matter for agent memory -- scope-filtered vector search, tenant-isolated reads, provenance chain traversal with known depth -- are relational patterns, not graph patterns.
+
+The security model is particularly instructive. In a graph database, if there's a traversal path from A to C through D but the user can't see D, the behavior is non-monotonic and role-dependent. In MemoryHub, scope isolation is enforced at the SQL level: you don't see nodes outside your authorized scopes. No path-traversal ambiguity, no information leakage through graph structure.
+
+Neo4j Agent Memory (neo4j-labs/agent-memory) is a strong project that provides richer graph traversal and a mature entity extraction pipeline. It focuses on different priorities than MemoryHub: traversal expressiveness and framework integrations over scope hierarchy, RBAC, governed compaction, and compliance. Both are valid design centers -- they serve different deployment contexts.
+
+### Do we need a graph database?
+
+It's a fair question. The reasoning usually goes: ontologies are graphs, agent memory involves relationships, therefore you need a graph database. Sakhatsky (April 2026) offers a useful counterpoint -- each step in that chain is weaker than it looks.
+
+MemoryHub is a context graph, not a knowledge graph (see `research/surveys/knowledge-and-graph-memory.md`). Context graphs capture decisions, experiences, and institutional memory -- the "why" and "how" of organizational operations. Knowledge graphs capture domain ontologies -- entities, taxonomies, and static relationships. These are different concerns with different access patterns.
+
+Context graph access patterns:
+
+- "Find memories similar to this query within my authorized scopes" -- vector search with SQL filters
+- "What was the rationale behind this decision?" -- parent-child traversal, 1-2 hops
+- "How has this knowledge evolved?" -- version chain traversal, linear
+- "What contradicts this assertion?" -- embedding similarity within scope, SQL query
+
+None of these require unbounded graph traversal. All of them require scope isolation, tenant filtering, and vector search -- PostgreSQL's strengths.
+
+MemoryHub does have a deferred decision point (Phase 3 of graph-enhanced memory design). If production observability shows we need depth > 3 hops in production queries, community detection or centrality algorithms, graph neural network workloads, or p95 latency > 200ms on graph traversal, then we evaluate Apache AGE (Cypher on PostgreSQL -- see the graph relationships section above), NetworkX (see the in-memory evolution path above), or Neo4j as a dedicated analytics sidecar. We'd rather make that decision based on observed production access patterns than predict it upfront. Note that as of April 2026, AGE is still in the Apache Incubator, so its stability and index management story are not yet production-grade for our purposes.
+
+### Could I plug in my own storage backend?
+
+Not today, but the architecture doesn't prevent it.
+
+The storage layer sits behind a service abstraction (`services/memory.py`, `services/database.py`). An adapter pattern that swaps PostgreSQL for another backend is architecturally feasible. MemoryHub doesn't ship a pluggable interface today because:
+
+**The governance substrate is tightly coupled to SQL.** Scope isolation, tenant filtering, curation pipeline queries, similarity search, and temporal versioning are all SQL-level operations. Abstracting them into a storage-agnostic interface is a significant engineering investment with unclear demand.
+
+**Pluggability is a framework concern, not a service concern.** MemoryHub is a deployed service, not a library. Agents talk to it over MCP. They don't care what database sits behind the API. The question "can I plug in my own storage?" is really "can I deploy MemoryHub on my preferred database?" -- which is a deployment option, not a plugin architecture.
+
+**For teams with existing Neo4j investment.** If your organization already operates Neo4j and wants MemoryHub's governance model on top of it, the natural path is a Neo4j storage adapter behind the existing service interface. PostgreSQL remains the zero-dependency default; Neo4j would be an opt-in for teams that already have the operational expertise. This is tracked as a future consideration (see issue backlog).
+
+### What about pluggable embedding models?
+
+The embedding model (currently sentence-transformers/all-MiniLM-L6-v2, 384 dimensions) is already configurable via the embedding service. Changing models requires re-embedding existing memories (a migration task), but the architecture supports it. The vector dimension is defined in one place and propagated through the schema.
+
+### Summary
+
+| Question | Short answer |
+|---|---|
+| Why PostgreSQL? | Handles all access patterns natively, ships with OpenShift, zero additional dependencies |
+| Why not Neo4j? | Additional operational dependency; our access patterns (shallow traversal, scope-filtered search) are well-served by PostgreSQL |
+| Is it a graph database? | No. It's a governed memory service that uses graph structures (trees, edges) on PostgreSQL |
+| Can I plug in Neo4j? | Not today. Architecturally feasible as a contributed adapter. Tracked as future consideration |
+| What if you outgrow PostgreSQL? | Phase 3 decision point: Apache AGE (Cypher on PostgreSQL) or Neo4j analytics sidecar, driven by production data |
+
+### Sources
+
+- Michael Sakhatsky, "You Probably Don't Need a Graph Database for Your Knowledge Graph" (April 2026)
+- Gartner, "Context Graphs" research (March 2026)
+- MemoryHub internal: `research/surveys/knowledge-and-graph-memory.md`, `research/surveys/memory-products-landscape.md`, `docs/design/graph-enhanced-memory.md`

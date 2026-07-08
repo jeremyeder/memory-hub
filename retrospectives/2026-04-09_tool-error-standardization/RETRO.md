@@ -40,7 +40,7 @@ Per the NEXT_SESSION briefing: file 12 sub-issues, land #47 (already closed), la
 ## Action Items
 
 - [ ] Fix PG password placeholder and deploy (`deploy/openshift.yaml:40`)
-- [ ] Land #138 (docs update) — TOOLS_PLAN.md, README, docs/mcp-server.md
+- [ ] Land #138 (docs update) — TOOLS_PLAN.md, README, docs/design/mcp-server.md
 - [ ] Close #139 and #97 after #138 lands
 - [ ] In sub-agent prompts, always use `gitleaks detect --source=. --no-banner` not `/pre-commit`
 

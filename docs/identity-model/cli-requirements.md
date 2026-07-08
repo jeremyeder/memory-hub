@@ -188,7 +188,7 @@ the harness directly rather than as long-running pods.
 ## Conventions enforced
 
 - **API key format**: `mh-svc-<role>-<instance>-<year>` for service agents.
-  Existing convention from `docs/governance.md`.
+  Existing convention from `docs/design/governance.md`.
 - **Agent ID format**: `<role>-<instance>` (e.g., `ed-triage-nurse-01`).
   Used as `user_id` and as a label value.
 - **Instance numbering**: zero-padded 2-digit (01, 02, ..., 99). Numbering

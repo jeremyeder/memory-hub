@@ -2,7 +2,7 @@
 
 At inference time, every piece of context an agent has access to -- memories, RAG results, web search, configuration files, tool outputs, conversation history -- collapses into a single JSON payload sent to the LLM. The model doesn't know where any token came from. Provenance only exists if the developer chose to tag it.
 
-This document shows what that assembly looks like concretely, using small examples from real systems. The [agent integration explainer](how-agents-use-memoryhub.md) covers the conceptual "why"; this covers the mechanical "what."
+This document shows what that assembly looks like concretely, using small examples from real systems. The [Agent Integration Guide](../guides/agent-integration-guide.md) covers the conceptual "why"; this covers the mechanical "what."
 
 ## Sources feeding the context window
 

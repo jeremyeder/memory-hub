@@ -220,7 +220,7 @@ PatternFly components: `Table`, `Toolbar`, `Drawer`, `Modal` (for delete confirm
 
 **Rename support.** `projects.name` is the primary key and is used as the FK target in `project_memberships` and (after migration 013) `memory_nodes`. Renaming a project would require cascading updates across multiple tables. Renames are out of scope for this design; projects are named at creation and the name is immutable. If rename becomes a requirement, the right approach is a surrogate UUID PK with a separate unique slug column.
 
-**Role semantics.** The `role` column on `project_memberships` has values `member` and `admin` but the codebase does not yet enforce what `admin` can do beyond what `member` can. This design uses `admin` to gate `update_project` and `manage_membership` operations. The exact permission matrix should be documented in `docs/governance.md` when implemented.
+**Role semantics.** The `role` column on `project_memberships` has values `member` and `admin` but the codebase does not yet enforce what `admin` can do beyond what `member` can. This design uses `admin` to gate `update_project` and `manage_membership` operations. The exact permission matrix should be documented in `docs/design/governance.md` when implemented.
 
 **Quota enforcement granularity.** `max_memories` counts all active (non-deleted, `is_current = true`) memories for the project. Whether this counts across all versions or just current nodes should be decided at implementation time. Counting only `is_current` rows is simpler and more useful (reflects what agents actually see).
 

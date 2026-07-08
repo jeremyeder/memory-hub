@@ -101,7 +101,7 @@ pip install -e ".[dev]"
 pytest tests/ -q
 ```
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md) for per-subproject test commands.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md) for per-subproject test commands.
 
 ## With PostgreSQL + pgvector
 
@@ -148,4 +148,4 @@ podman stop memoryhub-pg && podman rm memoryhub-pg
 
 ## With the full stack on OpenShift
 
-For a complete deployment (MCP server, auth service, dashboard UI, PostgreSQL, MinIO, Valkey), see the cluster install section in the [README](../README.md). The entry point is `make install` from the repo root. Most contributors do not need this -- local PostgreSQL testing covers the vast majority of development scenarios.
+For a complete deployment (MCP server, auth service, dashboard UI, PostgreSQL, MinIO, Valkey), see the cluster install section in the [README](../../README.md). The entry point is `make install` from the repo root. Most contributors do not need this -- local PostgreSQL testing covers the vast majority of development scenarios.

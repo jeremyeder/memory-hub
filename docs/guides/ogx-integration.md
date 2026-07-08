@@ -138,4 +138,4 @@ automatically handles dedup, PII blocking, and entity extraction.
 
 - `demos/ogx-memory/` -- complete demo with scaffolded agent, gateway, and UI
 - `planning/llamastack-integration/` -- full integration design (phases 1-3)
-- `docs/mcp-server.md` -- MCP tool surface and parameter reference
+- `docs/design/mcp-server.md` -- MCP tool surface and parameter reference

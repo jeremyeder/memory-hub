@@ -34,7 +34,7 @@ Determine whether MemoryHub could appear as a native tile in the RHOAI dashboard
 |-----|----------|------------|
 | Graph visualization library not chosen | Follow-up | #21 — spike to evaluate vis.js, cytoscape.js, d3-force with PatternFly |
 | AuthConfig YAML API version unverified | Follow-up | #22 — check Authorino CRD version on cluster before implementation |
-| No design doc for contradiction_reports table | Follow-up | #23 — extend docs/storage-layer.md before implementing #20 |
+| No design doc for contradiction_reports table | Follow-up | #23 — extend docs/design/storage-layer.md before implementing #20 |
 | OdhApplication getStartedMarkDown is placeholder | Minor | #24 — write real content before applying CR to cluster |
 | Contradiction tracking is in-memory only | Follow-up | #20 — add contradiction_reports table |
 

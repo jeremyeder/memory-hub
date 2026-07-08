@@ -441,7 +441,6 @@ This feature depends on:
 
 Features that depend on this:
 - Issue #169 (context compaction) references `conversation_threads` as the anchor for compaction cursors
-- Kagenti Phase 3 (`MemoryHubContextStore`) will use `create_thread` + `append_message` as the persistence backend, replacing the planned `memory_node` branch approach documented in `planning/kagenti-integration/architecture.md`
 - EU AI Act audit trail reporting — any compliance reporting tooling will query `conversation_extractions` for provenance
 
 ---

@@ -133,6 +133,6 @@ Brief summary to the user:
 
 - The namespace is `memory-hub-mcp` and the deployment is `memory-hub-mcp`. Both are hardcoded in `deploy/deploy.sh`. Do not override.
 - There are other services in the `memory-hub-mcp` namespace (e.g. `memoryhub-ui`). Never use cluster-wide delete operations. Always scope to `app.kubernetes.io/name=memory-hub-mcp`.
-- The server-side library source lives at the **repo root** as `src/memoryhub_core/` (distribution name `memoryhub-core`, import name `memoryhub_core`). The SDK at `sdk/src/memoryhub/` is a different package published to PyPI. See `docs/package-layout.md`.
-- If the build fails because of import errors involving `memoryhub_core.services` or `memoryhub_core.storage`, you are probably editing `sdk/src/memoryhub/` instead of `src/memoryhub_core/`. See `docs/package-layout.md`.
+- The server-side library source lives at the **repo root** as `src/memoryhub_core/` (distribution name `memoryhub-core`, import name `memoryhub_core`). The SDK at `sdk/src/memoryhub/` is a different package published to PyPI. See `planning/archive/package-layout.md`.
+- If the build fails because of import errors involving `memoryhub_core.services` or `memoryhub_core.storage`, you are probably editing `sdk/src/memoryhub/` instead of `src/memoryhub_core/`. See `planning/archive/package-layout.md`.
 - If `mcp-test-mcp` is not available, STOP and ask the user to enable it. Do not declare success without verifying the deployed tools.

@@ -175,7 +175,7 @@ Most cluster-specific issues end up being solvable without the contributor ever 
 
 ## Related documents
 
-- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — local development setup, coding conventions, PR flow
-- [`docs/auth/openshift-broker.md`](auth/openshift-broker.md) — the **future** OAuth 2.1 authorization-code flow that will replace the current `register_session` api-key shim
-- [`docs/governance.md`](governance.md) — the RBAC and JWT architecture that enforces what each client credential can do
-- [`memory-hub-mcp/deploy/users-configmap.example.yaml`](../memory-hub-mcp/deploy/users-configmap.example.yaml) — ConfigMap template for the current api-key shim
+- [`CONTRIBUTING.md`](../../CONTRIBUTING.md) — local development setup, coding conventions, PR flow
+- [`docs/auth/openshift-broker.md`](../auth/openshift-broker.md) — the **future** OAuth 2.1 authorization-code flow that will replace the current `register_session` api-key shim
+- [`docs/design/governance.md`](../design/governance.md) — the RBAC and JWT architecture that enforces what each client credential can do
+- [`memory-hub-mcp/deploy/users-configmap.example.yaml`](../../memory-hub-mcp/deploy/users-configmap.example.yaml) — ConfigMap template for the current api-key shim

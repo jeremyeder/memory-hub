@@ -151,7 +151,7 @@ def bulk_delete_memories(
 
 ## Audit Trail for Deletions
 
-The [governance.md](../governance.md) audit trail schema supports deletion logging through its existing `state_before` field. Admin deletions extend this with two modes:
+The [governance.md](../design/governance.md) audit trail schema supports deletion logging through its existing `state_before` field. Admin deletions extend this with two modes:
 
 **Normal deletion audit entry:**
 
@@ -195,9 +195,9 @@ The content hash serves a specific purpose: after a spill cleanup, an automated 
 
 - **Core admin library structure**: `src/core/admin/` (operations, authorization, audit) does not yet exist and must be scaffolded as part of the first operation landed. See [README](README.md) for the current location and the future extraction plan.
 - **#42 -- Memory deletion**: Provides the soft-delete infrastructure that `hard_delete_memory` builds on. The status enum (`active`, `quarantined`, `soft_deleted`) extends the soft-delete model.
-- **RBAC `memory:admin` scope**: Defined in [governance.md](../governance.md). All operations in this document require this scope (some require additional sub-scopes).
-- **Audit trail schema**: The `audit_log` table defined in [governance.md](../governance.md) supports the audit entries described here. The sanitized-audit mode is a new convention on top of the existing schema (using `state_before: null` and putting the content hash in `request_context`). The schema comment on `request_context` in governance.md should be updated to acknowledge admin operations.
-- **Memory `status` column**: Not yet defined in [storage-layer.md](../storage-layer.md). The `status` enum described above (`active`, `quarantined`, `soft_deleted`) requires a schema migration that adds a `status` column to `memory_nodes` and updates all read queries to filter by `status = 'active'` for non-admin callers. This is in-scope for the same milestone as `quarantine_memory`.
+- **RBAC `memory:admin` scope**: Defined in [governance.md](../design/governance.md). All operations in this document require this scope (some require additional sub-scopes).
+- **Audit trail schema**: The `audit_log` table defined in [governance.md](../design/governance.md) supports the audit entries described here. The sanitized-audit mode is a new convention on top of the existing schema (using `state_before: null` and putting the content hash in `request_context`). The schema comment on `request_context` in governance.md should be updated to acknowledge admin operations.
+- **Memory `status` column**: Not yet defined in [storage-layer.md](../design/storage-layer.md). The `status` enum described above (`active`, `quarantined`, `soft_deleted`) requires a schema migration that adds a `status` column to `memory_nodes` and updates all read queries to filter by `status = 'active'` for non-admin callers. This is in-scope for the same milestone as `quarantine_memory`.
 - **`Identity` type**: A shared type passed into every core operation, capturing actor id, actor type (`user`, `service`, `worker`), tenant, and scopes. Defined as part of the core library scaffold.
 
 ## Decisions (resolved 2026-06-30)

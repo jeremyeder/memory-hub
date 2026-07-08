@@ -363,15 +363,16 @@ issues.
 
 These are *not* part of this work, even though they're tangentially related:
 
-- **kagenti SPIFFE-based token exchange (RFC 8693).** Tracked separately in
-  `../../planning/kagenti-integration/`. That work concerns service identities being
-  exchanged across trust boundaries, not human users in browsers.
+- **Token exchange (RFC 8693) for platform-integrated service agents.** Designed
+  but not wired; concerns service identities exchanged across trust boundaries,
+  not human users in browsers. (Originally scoped for the since-dropped Kagenti
+  integration.)
 - **Per-user RBAC grants.** The broker mints JWTs with default scopes. A
   separate mechanism for granting elevated scopes to specific users (admin
   panel, CLI, GitOps) is its own design question.
 - **Audit log of broker authentications.** The broker should log
   authentications somewhere durable, but the audit-log story belongs to
-  `docs/governance.md` and the identity-model audit stub, not here.
+  `docs/design/governance.md` and the identity-model audit stub, not here.
 - **Multi-issuer support in the MCP server.** The MCP server keeps trusting
   only `memoryhub-auth` JWTs. Federating with external IdPs that issue their
   own JWTs is a different design.

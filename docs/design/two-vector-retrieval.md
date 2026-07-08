@@ -88,10 +88,43 @@ The approach was validated against a 200-memory synthetic corpus across four pip
 - **NEW-2** (rejected): focus-augmented query embedding (catastrophic cross-topic recall collapse)
 - **NEW-3** (rejected): cross-encoder only, no focus signal (roughly neutral on short, topic-coherent memories)
 
-NEW-1 strictly dominated on recall, precision, and MRR at `session_focus_weight` between 0.2 and 0.4, with the largest gains on ambiguous and cross-topic queries -- exactly the cases where contextual bias matters most. Full methodology and raw data are in [`research/agent-memory-ergonomics/two-vector-retrieval.md`](../research/agent-memory-ergonomics/two-vector-retrieval.md) and [`benchmarks/`](../benchmarks/).
+NEW-1 strictly dominated on recall, precision, and MRR at `session_focus_weight` between 0.2 and 0.4, with the largest gains on ambiguous and cross-topic queries -- exactly the cases where contextual bias matters most. Full methodology and raw data are in [`research/agent-memory-ergonomics/two-vector-retrieval.md`](../../research/agent-memory-ergonomics/two-vector-retrieval.md) and [`benchmarks/`](../../benchmarks).
+
+## Temporal awareness
+
+Retrieval is also temporally aware: memories can carry a semantic expiry, and search can filter on it. Shipped in the 2026-06-30 session (#282, #292).
+
+### `relevant_until` and the temporal classifier (#282)
+
+Every memory node has a nullable `relevant_until` timestamp (partial index on non-null values). When a memory is written or updated without an explicit `relevant_until`, a lightweight heuristic classifier (`memoryhub_core/services/temporal.py`) runs synchronously in the write path — regex/heuristic only, no LLM call. Categories, in priority order:
+
+- **Explicit deadline** — "deploy by 2026-07-15", "due March 1st" → the specific date
+- **Relative deadline** — "within 2 weeks", "next month" → computed date
+- **Implicit temporal markers** — "currently", "for now", "temporarily" → now + 90 days
+- **Version-bound** — "PostgreSQL 15", "v3.2" → `None` (version-specific, not time-bound)
+- **Evergreen** — "prefers dark mode" → `None` (no semantic expiry)
+
+On `update_memory`, `relevant_until` is recomputed when content changes and inherited from the previous version otherwise.
+
+### Search-time `temporal_status` filter
+
+`search_memory` accepts a `temporal_status` filter computed from `relevant_until`:
+
+| Value | Meaning |
+|-------|---------|
+| `current` | `relevant_until` is null (evergreen) or more than 7 days away |
+| `expiring_soon` | `relevant_until` within the next 7 days |
+| `expired` | `relevant_until` in the past |
+| `all` / unset | No temporal filtering |
+
+Each result also carries a computed `temporal_status` field, so agents can see expiry state even when not filtering. Expired memories are filtered, not deleted — the data is preserved and reachable via `temporal_status="expired"` or `"all"`.
+
+### Within-user pattern surfacing (#292)
+
+At search time, `detect_patterns` (`memoryhub_core/services/pattern.py`) runs a single pgvector cosine query against the caller's own recent memories (default: last 30 days, similarity ≥ 0.80). When 3+ recent memories cluster around the query, the search response is annotated with `pattern_signals` — each signal carries the pattern type (e.g., `topic_cluster`), matching-memory count, time window, the most recent matching memory's ID, and a human-readable `summary_hint`. This is a best-effort read-path enhancement: any failure returns an empty list rather than breaking search. The intent is to let the agent notice "the user keeps writing memories about X lately" and act on it (e.g., propose consolidation).
 
 ## Further reading
 
-- [Agent memory ergonomics design](agent-memory-ergonomics/design.md) -- the full design cluster covering search shape, session focus, loading patterns, and push notifications
-- [Cross-encoder benchmark](../benchmarks/) -- cost/benefit analysis of reranking at various candidate set sizes
-- [Architecture](ARCHITECTURE.md) -- how the retrieval pipeline fits into the overall system
+- [Agent memory ergonomics design](../agent-memory-ergonomics/design.md) -- the full design cluster covering search shape, session focus, loading patterns, and push notifications
+- [Cross-encoder benchmark](../../benchmarks) -- cost/benefit analysis of reranking at various candidate set sizes
+- [Architecture](../ARCHITECTURE.md) -- how the retrieval pipeline fits into the overall system

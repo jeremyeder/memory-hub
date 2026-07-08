@@ -22,7 +22,7 @@ MemoryHub today:
    `authorize_write` for project scope return `True` unconditionally
    (`memory-hub-mcp/src/core/authz.py:135,156`). The hive-mind story requires
    real enforcement, not a rubber stamp.
-3. **No audit log exists** — not even a stub. The design in `docs/governance.md`
+3. **No audit log exists** — not even a stub. The design in `docs/design/governance.md`
    is solid but unimplemented.
 
 The identity model design captured here is the foundation that the demo work,
@@ -51,7 +51,7 @@ demo-harness driver injection, the data model that lets all of those work.
 
 Out of scope for the demo (tracked as future work, see linked issues):
 
-- Phase 2 OAuth 2.0 token exchange / SPIFFE-based identity (`../../planning/kagenti-integration/`)
+- Phase 2 OAuth 2.0 token exchange (RFC 8693) for platform-integrated agents — designed, not yet wired
 - Tenant isolation (the demo runs in a single tenant)
 - Full audit log persistence (stub interface only; persistence is future work)
 - Intersection authorization enforcement (data model supports it; demo runs
