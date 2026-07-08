@@ -1,0 +1,39 @@
+# OGX (LlamaStack) distribution config with MemoryHub memory
+#
+# This run.yaml registers MemoryHub as an MCP tool group so the agent
+# gets persistent cross-session memory without any memory-handling code.
+#
+# Usage:
+#   export MEMORYHUB_MCP_URL="https://memory-hub-mcp-memory-hub-mcp.apps.<cluster>/mcp"
+#   export MEMORYHUB_API_KEY="mh-dev-..."
+#   llama stack run ./run.yaml
+#
+# Requires: OGX (llama-stack) with MCP support
+
+version: 2
+
+image_name: ogx-memory-demo
+
+apis:
+  - agents
+  - inference
+  - tool_runtime
+
+providers:
+  inference:
+    - provider_id: together
+      provider_type: remote::together
+      config:
+        url: https://api.together.xyz/v1
+        api_key: ${TOGETHER_API_KEY}
+
+  tool_runtime:
+    - provider_id: model-context-protocol
+      provider_type: remote::model-context-protocol
+      config: {}
+
+tool_groups:
+  - toolgroup_id: mcp::memoryhub
+    provider_id: model-context-protocol
+    mcp_endpoint:
+      uri: ${MEMORYHUB_MCP_URL}
