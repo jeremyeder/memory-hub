@@ -190,7 +190,7 @@ post-demo.
 
 ## Audit logging — stub now, persistence later
 
-No audit log exists in the codebase. The design in `docs/governance.md:407`
+No audit log exists in the codebase. The design in `docs/design/governance.md:407`
 is solid but unimplemented. We need *something* for the demo because the
 demo's audit story is one of its three core narratives.
 
@@ -249,7 +249,7 @@ deferred — it's expensive and the demo doesn't need it.
 The original plan was a custom audit log: partitioned `audit_log` table,
 append-only enforcement via PostgreSQL Row-Level Security, dedicated
 `audit_writer` role, retention policies (the design at
-`docs/governance.md:407`). Before building any of that, evaluate
+`docs/design/governance.md:407`). Before building any of that, evaluate
 **LlamaStack telemetry** as the persistence backend.
 
 LlamaStack ships as a Technology Preview on Red Hat OpenShift AI and

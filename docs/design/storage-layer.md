@@ -1,0 +1,269 @@
+# Storage Layer
+
+MemoryHub's storage layer uses two systems: PostgreSQL for structured data, vector search, and graph relationships; and MinIO for S3-compatible document storage. This is a deliberate consolidation -- using PostgreSQL for multiple roles reduces operational complexity and keeps the FIPS surface area small.
+
+## PostgreSQL: The Workhorse
+
+PostgreSQL handles three distinct responsibilities within MemoryHub, all on the same database instance managed by the OOTB operator that ships with OpenShift.
+
+### Vector search via pgvector
+
+pgvector adds vector similarity search to PostgreSQL. Memory nodes get embeddings generated at write time, stored in a vector column, and queried using pgvector's distance operators (cosine similarity, L2 distance, inner product). When an agent calls `search_memory`, the query text gets embedded and matched against stored vectors.
+
+pgvector is a good fit here because it keeps vector search collocated with the relational data. We don't need to synchronize between a separate vector database and PostgreSQL -- the embedding lives on the same row as the tree structure, scope metadata, and version history. For our scale target (hundreds of agents, thousands of memories per user), pgvector on a well-indexed PostgreSQL instance should be sufficient.
+
+The FIPS story is clean: pgvector computes vector distances using mathematical operations (L2 norm, dot product, cosine). These are floating-point arithmetic, not cryptographic functions. pgvector doesn't use MD5, SHA, or any crypto primitives, so it works without issues in FIPS mode.
+
+### Graph relationships
+
+Memory nodes form a tree, and the tree structure needs to be queryable. We need to answer questions like "give me all branches of this node," "find the rationale for this memory," and "trace the provenance of this organizational memory back to source user memories."
+
+**Decision: adjacency lists + explicit relationships table for v1.**
+
+Our trees are shallow (3-4 levels), so recursive CTEs (`WITH RECURSIVE`) handle traversal efficiently without additional complexity. This approach requires no new PostgreSQL extensions -- it works with the OOTB operator as-is, which matters because extension support there is less documented than with Crunchy Data's operator. Apache AGE was the alternative (openCypher query support, more expressive graph traversal), but it's an incubator-stage dependency that needs validation we don't need yet. The evolution path to AGE or an in-memory graph remains open.
+
+#### `memory_relationships` table
+
+Beyond the parent/child tree structure (handled by `parent_id` on the node row), we need first-class cross-node relationships: provenance chains, semantic conflicts, supersession across scopes. These live in a dedicated relationships table rather than encoding them as special node types.
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | UUID | PK |
+| `source_id` | UUID FK → memory_nodes | The "from" node |
+| `target_id` | UUID FK → memory_nodes | The "to" node |
+| `relationship_type` | String | Type of edge |
+| `metadata_` | JSON | Relationship-specific context |
+| `created_at` | DateTime (tz-aware) | When created |
+| `created_by` | String | Who created it |
+
+Initial relationship types:
+
+- `derived_from` -- provenance; this memory was produced from that one
+- `supersedes` -- cross-scope replacement; an org memory supersedes a user memory on the same topic
+- `conflicts_with` -- semantic conflict; two memories contradict each other
+- `related_to` -- general association when no stronger type applies
+
+Indexes on `(source_id, relationship_type)` and `(target_id, relationship_type)` support the common access patterns: "give me all outbound edges of type X from this node" and "give me everything that points at this node."
+
+### Evolution path: in-memory graph
+
+For graph traversals at scale, there's an option we want to keep available: an in-process graph library (like NetworkX in Python or petgraph in Rust) that loads the graph structure from PostgreSQL at startup and runs traversals in memory.
+
+The pattern would be: load the adjacency data from PostgreSQL into an in-memory graph structure, run traversals there (which avoids database round-trips), and write mutations back to PostgreSQL for durability. This could be significantly faster for complex multi-hop traversals.
+
+This isn't needed for v1 -- recursive CTEs against shallow trees should handle our initial graph complexity. If recursive CTEs become a bottleneck as graph depth or query complexity grows, this is the natural next step. Keeping the graph query interface clean means swapping the traversal engine behind it is a contained change.
+
+### Contradiction tracking
+
+Agents report contradictions when they observe behavior that conflicts with a stored memory. Previously these were stored as a JSON list in the memory node's `metadata_` column — convenient but unqueryable across memories and lost on node updates. The `contradiction_reports` table makes contradictions first-class.
+
+#### `contradiction_reports` table
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `id` | UUID | PK, auto-generated |
+| `memory_id` | UUID FK → memory_nodes | The memory being contradicted. CASCADE on delete — if the memory is removed, its contradiction history goes with it. |
+| `observed_behavior` | Text | What was observed that conflicts. Agents are instructed to be specific ("user ran docker-compose up with 12 services") not vague ("used Docker"). |
+| `confidence` | Float (0.0–1.0) | Reporter's confidence that this is a real contradiction, not a temporary exception. |
+| `reporter` | String(255) | The `owner_id` of the agent/user that filed the report. Sourced from the authenticated session identity. |
+| `created_at` | DateTime (tz-aware) | Auto-timestamped at insert. |
+| `resolved` | Boolean, default false | Whether the contradiction has been addressed (memory updated, report dismissed, etc.). |
+| `resolved_at` | DateTime (tz-aware), nullable | When resolution occurred. Null until resolved. |
+
+#### Relationship to the curation engine
+
+The `report_contradiction` service function:
+1. Verifies the target memory exists (raises `MemoryNotFoundError` if not)
+2. Inserts a row into `contradiction_reports`
+3. Counts unresolved contradictions for that memory
+4. Returns the count to the MCP tool, which compares against a threshold (currently 5)
+
+When the threshold is reached, the MCP tool signals `revision_triggered: true` in its response. The consuming agent is expected to prompt the user for memory review — the system records the signal but doesn't auto-modify the memory.
+
+#### Query patterns
+
+The dashboard's Contradiction Log panel (Panel 5 in the RHOAI demo design) uses these access patterns:
+
+- **Unresolved contradictions for a memory:** `WHERE memory_id = ? AND resolved = false` — used by the curation threshold check and by the dashboard detail view.
+- **All unresolved contradictions, newest first:** `WHERE resolved = false ORDER BY created_at DESC` — the main dashboard panel listing.
+- **Resolution rate over time:** `GROUP BY date_trunc('day', created_at), resolved` — for the dashboard's trend view.
+
+#### Index strategy
+
+Two composite indexes cover the common queries:
+
+- `ix_contradiction_reports_memory_resolved` on `(memory_id, resolved)` — serves the per-memory threshold count and the detail view. The query planner can use this for either column alone or both.
+- `ix_contradiction_reports_resolved_created` on `(resolved, created_at)` — serves the main dashboard listing (unresolved, ordered by date). Also supports the resolution rate query.
+
+No partial index on `resolved = false` for now — the table is append-heavy and most rows will start unresolved, so a partial index wouldn't save much. If the resolved/unresolved ratio shifts heavily toward resolved over time, a partial index becomes worthwhile.
+
+#### Migration path
+
+The move from in-memory (`metadata_["contradictions"]`) to persistent (`contradiction_reports` table) was a clean cut — the service function was rewritten, not dual-pathed. Any contradictions stored in metadata JSON before migration 005 remain there as historical artifacts but are no longer read or written by the service. New contradictions go exclusively to the table.
+
+## MinIO: Document Storage
+
+MinIO provides S3-compatible object storage for memories that are too large for a database row. Full procedure documents, markdown files with embedded examples, comprehensive project context -- these live in MinIO as objects, with a reference (S3 key) stored in the PostgreSQL node row.
+
+MinIO runs on OpenShift via its Red Hat certified operator. For MemoryHub, it's deployed in distributed mode across multiple pods for durability.
+
+The FIPS story: MinIO AIStor supports FIPS 140-3 mode via Go 1.24's validated crypto module, enabled at runtime with `GODEBUG=fips140=on`. In FIPS mode, TLS uses AES-GCM cipher suites only, and object encryption (DARE -- Data At Rest Encryption) uses AES-256-GCM exclusively. MinIO includes a disclaimer that it makes "no statements regarding FIPS certification status," which is an honest position -- they use a validated module but haven't certified the product itself. For our purposes, the technical implementation is sound.
+
+### When content goes to MinIO vs. PostgreSQL
+
+The split is based on size and access pattern:
+
+Content that stays in PostgreSQL: short memories (a few sentences), embeddings, tree structure, metadata, version history, audit logs. These benefit from transactional consistency and relational queries.
+
+Content that goes to MinIO: document-sized memories (multi-paragraph or multi-page), files attached to memories, archived content. These benefit from object storage economics and streaming access.
+
+**Threshold: 1 KB (1024 bytes), configurable via `MEMORYHUB_S3_THRESHOLD_BYTES`.** The three storage scenarios are:
+
+1. **Content ≤ threshold**: stored inline in PostgreSQL, full content embedded, no chunks created.
+2. **Content > threshold, S3 available**: prefix stored in the PostgreSQL row (`content` column), full content written to MinIO (`content_ref`), semantic chunks created as child nodes.
+3. **Content > threshold, no S3 configured**: full content stored inline in PostgreSQL, embedding truncated to the ~1000-character prefix (same as scenario 2), semantic chunks still created.
+
+Chunking fires in scenarios 2 and 3 — it is not conditional on S3 availability.
+
+The rationale for 1 KB: all-MiniLM-L6-v2 (our embedding model) rejects inputs above ~1100 characters of English text with HTTP 413. Setting the threshold at 1024 bytes ensures content that would fail the embedder is always handled with a safe prefix (~1000 chars) embedded instead.
+
+The node row always exists in PostgreSQL regardless -- MinIO stores the body, PostgreSQL stores everything else including a reference to the MinIO object.
+
+### What gets embedded for oversized content
+
+For memories that exceed the threshold, only a truncated prefix (~1000 characters, ~250 tokens) is embedded for the parent node, regardless of whether the full content lives in MinIO or inline in PostgreSQL. The all-MiniLM-L6-v2 embedder has a practical input limit of ~1100 characters of English text; 1000 provides margin. Full content is searchable via **semantic chunk children** -- each chunk is a child node with `branch_type="chunk"`, its own embedding, and `weight=0.0`. Agents find relevant chunks through `search_memory`, then follow `parent_id` to retrieve the full memory.
+
+### Curator participation
+
+The curation engine runs on the full content string but uses the prefix embedding for similarity comparison when checking for near-duplicates. This may reduce dedup sensitivity for content that only differs deep in the body -- two long documents with identical openings but different conclusions could slip past. This is acceptable divergence: the curator is a best-effort dedup aid, not a guarantee. If precision matters, agents can call `manage_graph(action="get_similar", ...)` explicitly after writing large content.
+
+### Read-time behavior
+
+**Lazy hydration.** `read_memory` returns the prefix (the `content` column) by default. When called with `hydrate=True`, the full content is fetched from S3 and returned in place of the prefix. Search results for chunk nodes include a `parent_hint` field guiding the agent to the full memory via its `parent_id`.
+
+This keeps the common read path fast (no S3 round-trip) while giving agents a clear escalation path when they need the full document.
+
+### Version chain in S3
+
+Each version of an S3-backed memory gets its own S3 object, keyed as `{tenant_id}/{memory_id}/{version_id}`. On update, a new S3 object is uploaded and the PostgreSQL row's `content_ref` is updated to point to it. The previous version's S3 object lives until the version expires (TTL-based, governed by the same retention policy as PostgreSQL version rows). On delete, S3 objects for all versions in the chain are removed in a single batch operation.
+
+### Semantic chunking
+
+When content exceeds the 1 KB threshold, the write path creates **semantic chunks** as child nodes in the memory tree regardless of whether MinIO is configured. Chunking is decoupled from S3 availability: even when content is stored inline in PostgreSQL (no S3), chunks are still created to enable fine-grained search over large content without requiring agents to scan the full body.
+
+Chunk nodes have:
+- `branch_type="chunk"` -- distinguishes them from rationale, provenance, and other branch types
+- `weight=0.0` -- chunks are search scaffolding, not memories in their own right; zero weight keeps them out of weight-based rankings
+- Their own embedding -- each chunk is independently searchable via `search_memory`
+- `parent_id` pointing to the oversized parent memory
+
+**Chunking strategy**: `semantic_chunk()` splits content on paragraph boundaries first, then sentence boundaries, targeting ~256 tokens per chunk. This keeps each chunk well within the embedding model's 512-token window while preserving semantic coherence.
+
+**Search behavior**: Default search omits chunks whose parent is already in the result set (consistent with existing branch-collapsing behavior). This prevents a large document from dominating search results with multiple chunk hits when the parent memory already matched.
+
+**Retrieval paths** (cheapest to most expensive):
+1. **Read chunk directly** -- if the chunk itself answers the agent's question, no further action needed
+2. **Traverse graph** -- follow `parent_id` to get the parent memory's prefix and metadata
+3. **Hydrate** -- call `read_memory(memory_id, hydrate=True)` to fetch the full S3 content
+
+## Schema Design
+
+Here are the considerations that drove the schema design.
+
+### Core tables (conceptual)
+
+The memory node table is the center of the schema. It needs columns for: node ID (UUID), parent ID (nullable, for tree structure), scope (enum: user, project, role, org, enterprise), content (text, for short memories), content_ref (S3 key, for document memories), embedding (vector, via pgvector), weight (float), is_current (boolean), version (integer), previous_version_id (UUID, nullable), created_at, updated_at, created_by (agent/user identity), and node_type (enum: memory, rationale, provenance, description, etc.).
+
+The audit log table is append-only. Every memory operation (create, read, update, delete, promote, prune) gets a row with: operation type, target node ID, actor identity, timestamp, and a snapshot of relevant state before and after.
+
+Branch type metadata might warrant its own table, or it might be an enum on the node table. Required vs. optional branches could be enforced by policy rather than schema.
+
+### Indexing strategy
+
+pgvector indexes (IVFFlat or HNSW) on the embedding column for similarity search. B-tree indexes on scope, is_current, parent_id, and created_by for filtered queries. Partial indexes on `is_current = true` to accelerate the common case of "give me current memories only."
+
+### Connection pooling
+
+PgBouncer or a similar connection pooler in front of PostgreSQL. The MCP server will have many concurrent connections from agents; pooling prevents connection exhaustion. The OOTB operator may include PgBouncer -- this needs validation.
+
+## High Availability and Backup
+
+PostgreSQL runs with a primary and at least one synchronous replica, managed by the OOTB operator. Failover is automatic. Backups use the operator's built-in backup mechanism (likely pg_basebackup or a WAL archiving approach -- depends on what OOTB supports).
+
+MinIO runs in distributed mode (minimum 4 pods for erasure coding). Data survives the loss of up to half the pods. Bucket versioning is enabled for document recovery.
+
+Both systems' backup data should be encrypted. PostgreSQL backups inherit OS-level encryption. MinIO backups use DARE with the same KMS configuration as the live data.
+
+## Design Questions
+
+- ~~What's the right content size threshold for PostgreSQL vs. MinIO storage?~~ **Resolved**: 1 KB (1024 bytes). See "When content goes to MinIO vs. PostgreSQL" above.
+- How do we handle embedding model upgrades? If we switch embedding models, all existing vectors need re-computation. Do we store the model identifier alongside the embedding?
+- What's the retention policy for audit logs? Infinite retention is expensive; time-bounded retention loses forensic capability. Tiered storage (hot/warm/cold) for audit data?
+- Connection pooling: does the OOTB operator include PgBouncer, or do we deploy it separately?
+
+## FAQ / Design Rationale
+
+Common questions from colleagues and stakeholders about the storage architecture choices. The mechanics (pgvector fit, recursive CTEs, the Apache AGE evolution path) are covered in the sections above; this section captures the "why not something else" reasoning.
+
+### Why not Neo4j?
+
+Neo4j is an excellent graph database. MemoryHub doesn't use it for three reasons: operational dependency, deployment story, and fitness for purpose.
+
+**Operational dependency.** PostgreSQL ships with OpenShift out of the box. Neo4j is an additional product that enterprises must license (Enterprise Edition for production), deploy as a separate cluster, monitor, back up, and maintain HA for. For regulated enterprises -- MemoryHub's target market -- every dependency is a compliance surface. Adding Neo4j doubles the database operations burden for a capability PostgreSQL already provides.
+
+**Deployment story.** MemoryHub deploys with a single script (`deploy-full.sh`) that stands up everything it needs. Adding Neo4j means a second database cluster, a second backup strategy, a second HA configuration, a second set of credentials to manage. The golden test -- "uninstall and redeploy with zero manual steps" -- gets significantly harder with two database products.
+
+**Fitness for purpose.** Graph databases shine at unknown-depth recursive traversal: supply chains, social networks, fraud detection paths. MemoryHub's memory trees have bounded, shallow depth. The access patterns that matter for agent memory -- scope-filtered vector search, tenant-isolated reads, provenance chain traversal with known depth -- are relational patterns, not graph patterns.
+
+The security model is particularly instructive. In a graph database, if there's a traversal path from A to C through D but the user can't see D, the behavior is non-monotonic and role-dependent. In MemoryHub, scope isolation is enforced at the SQL level: you don't see nodes outside your authorized scopes. No path-traversal ambiguity, no information leakage through graph structure.
+
+Neo4j Agent Memory (neo4j-labs/agent-memory) is a strong project that provides richer graph traversal and a mature entity extraction pipeline. It focuses on different priorities than MemoryHub: traversal expressiveness and framework integrations over scope hierarchy, RBAC, governed compaction, and compliance. Both are valid design centers -- they serve different deployment contexts.
+
+### Do we need a graph database?
+
+It's a fair question. The reasoning usually goes: ontologies are graphs, agent memory involves relationships, therefore you need a graph database. Sakhatsky (April 2026) offers a useful counterpoint -- each step in that chain is weaker than it looks.
+
+MemoryHub is a context graph, not a knowledge graph (see `research/surveys/knowledge-and-graph-memory.md`). Context graphs capture decisions, experiences, and institutional memory -- the "why" and "how" of organizational operations. Knowledge graphs capture domain ontologies -- entities, taxonomies, and static relationships. These are different concerns with different access patterns.
+
+Context graph access patterns:
+
+- "Find memories similar to this query within my authorized scopes" -- vector search with SQL filters
+- "What was the rationale behind this decision?" -- parent-child traversal, 1-2 hops
+- "How has this knowledge evolved?" -- version chain traversal, linear
+- "What contradicts this assertion?" -- embedding similarity within scope, SQL query
+
+None of these require unbounded graph traversal. All of them require scope isolation, tenant filtering, and vector search -- PostgreSQL's strengths.
+
+MemoryHub does have a deferred decision point (Phase 3 of graph-enhanced memory design). If production observability shows we need depth > 3 hops in production queries, community detection or centrality algorithms, graph neural network workloads, or p95 latency > 200ms on graph traversal, then we evaluate Apache AGE (Cypher on PostgreSQL -- see the graph relationships section above), NetworkX (see the in-memory evolution path above), or Neo4j as a dedicated analytics sidecar. We'd rather make that decision based on observed production access patterns than predict it upfront. Note that as of April 2026, AGE is still in the Apache Incubator, so its stability and index management story are not yet production-grade for our purposes.
+
+### Could I plug in my own storage backend?
+
+Not today, but the architecture doesn't prevent it.
+
+The storage layer sits behind a service abstraction (`services/memory.py`, `services/database.py`). An adapter pattern that swaps PostgreSQL for another backend is architecturally feasible. MemoryHub doesn't ship a pluggable interface today because:
+
+**The governance substrate is tightly coupled to SQL.** Scope isolation, tenant filtering, curation pipeline queries, similarity search, and temporal versioning are all SQL-level operations. Abstracting them into a storage-agnostic interface is a significant engineering investment with unclear demand.
+
+**Pluggability is a framework concern, not a service concern.** MemoryHub is a deployed service, not a library. Agents talk to it over MCP. They don't care what database sits behind the API. The question "can I plug in my own storage?" is really "can I deploy MemoryHub on my preferred database?" -- which is a deployment option, not a plugin architecture.
+
+**For teams with existing Neo4j investment.** If your organization already operates Neo4j and wants MemoryHub's governance model on top of it, the natural path is a Neo4j storage adapter behind the existing service interface. PostgreSQL remains the zero-dependency default; Neo4j would be an opt-in for teams that already have the operational expertise. This is tracked as a future consideration (see issue backlog).
+
+### What about pluggable embedding models?
+
+The embedding model (currently sentence-transformers/all-MiniLM-L6-v2, 384 dimensions) is already configurable via the embedding service. Changing models requires re-embedding existing memories (a migration task), but the architecture supports it. The vector dimension is defined in one place and propagated through the schema.
+
+### Summary
+
+| Question | Short answer |
+|---|---|
+| Why PostgreSQL? | Handles all access patterns natively, ships with OpenShift, zero additional dependencies |
+| Why not Neo4j? | Additional operational dependency; our access patterns (shallow traversal, scope-filtered search) are well-served by PostgreSQL |
+| Is it a graph database? | No. It's a governed memory service that uses graph structures (trees, edges) on PostgreSQL |
+| Can I plug in Neo4j? | Not today. Architecturally feasible as a contributed adapter. Tracked as future consideration |
+| What if you outgrow PostgreSQL? | Phase 3 decision point: Apache AGE (Cypher on PostgreSQL) or Neo4j analytics sidecar, driven by production data |
+
+### Sources
+
+- Michael Sakhatsky, "You Probably Don't Need a Graph Database for Your Knowledge Graph" (April 2026)
+- Gartner, "Context Graphs" research (March 2026)
+- MemoryHub internal: `research/surveys/knowledge-and-graph-memory.md`, `research/surveys/memory-products-landscape.md`, `docs/design/graph-enhanced-memory.md`

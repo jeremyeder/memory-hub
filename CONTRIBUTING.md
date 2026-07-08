@@ -8,10 +8,14 @@ If anything here is unclear, file an issue and tag it `documentation` — that's
 
 MemoryHub is a monorepo with one server-side library (`src/memoryhub_core/`) and four deployable subprojects (`memory-hub-mcp/`, `memoryhub-auth/`, `memoryhub-ui/`, plus the published Python `sdk/`) and one CLI client (`memoryhub-cli/`). The MCP server, BFF, alembic migrations, and the seed-OAuth-clients script all import from the server-side library; the SDK and CLI are independent and never touch the server-side code. See [`docs/SYSTEMS.md`](docs/SYSTEMS.md) for the per-subsystem inventory and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system overview.
 
-## Roles
+## Roles and governance
 
-- **Maintainers** have merge rights, deploy access to the shared demo cluster, and own project board triage. Currently: @rdwj.
+- **Maintainers** have merge rights, deploy access to the shared demo cluster, and own project board triage. The current list, the process for becoming a maintainer, and review/merge rules live in [`MAINTAINERS.md`](MAINTAINERS.md).
 - **Contributors** can file issues, open PRs, and deploy to their own clusters. No approval needed to file issues.
+
+All participation is subject to our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+**Questions and discussion:** use [GitHub Discussions](../../discussions) for questions, ideas, and anything that isn't a concrete bug or feature request. Issues are for actionable work items.
 
 ## Setting up a dev environment
 
@@ -79,26 +83,31 @@ npm run build
 
 ## Cluster access
 
-Most contributions never need to touch the demo OpenShift cluster. Local development against SQLite or a podman-run PostgreSQL is enough for almost everything. Contributors can deploy to their own OpenShift clusters freely. The shared demo cluster (`mcp-rhoai` context) is maintainer-managed; read-only access is granted on request, but deploy access is not shared. See [`docs/contributor-cluster-access.md`](docs/contributor-cluster-access.md) for details.
+Most contributions never need to touch the demo OpenShift cluster. Local development against SQLite or a podman-run PostgreSQL is enough for almost everything. Contributors can deploy to their own OpenShift clusters freely. The shared demo cluster (`mcp-rhoai` context) is maintainer-managed; read-only access is granted on request, but deploy access is not shared. See [`docs/admin/contributor-cluster-access.md`](docs/admin/contributor-cluster-access.md) for details.
 
 ## Filing issues
 
-Use the `/issue-tracker` slash command — it enforces our conventions automatically. If you're filing manually, the rules are:
+> **Security vulnerabilities are the exception to everything below: do not file a public issue.** Use GitHub's private vulnerability reporting instead — see [`SECURITY.md`](SECURITY.md).
 
-- **Every issue references a design document.** If the design doesn't exist yet, file the design issue first or write a skeleton in `docs/`. We don't accept feature issues without a design pointer.
+Use the issue templates (`bug_report`, `feature_request`, `design_proposal`) — they encode our conventions. Maintainers working with the project's agent tooling can use the `/issue-tracker` slash command, which enforces the same rules automatically. Either way, the rules are:
+
+- **Every issue references a design document.** For new designs, use the `design_proposal` template. If the design doesn't exist yet, file the design issue first or write a skeleton in `docs/`. We don't accept feature issues without a design pointer.
 - **Every issue starts in the Backlog column** of the MemoryHub project board. Issues flow Backlog → In Progress → Done.
 - **File issues under your own GitHub identity.** Do NOT add AI attribution to issue authors. Other developers need to know who to contact about an issue, and the human owner is the point of contact, not the AI assistant that helped draft the body.
 - **No internal-tooling issues on this public repo.** If something internal to your dev environment is broken, mention it in conversation rather than filing a public issue that reveals private infrastructure details.
 
 ## Submitting pull requests
 
-1. **Read the relevant design doc first.** Most subsystems have one in `docs/`. If you're touching the agent-memory-ergonomics work, read [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/design.md). If you're touching auth, read [`docs/governance.md`](docs/governance.md). If you're touching the package layout, read [`docs/package-layout.md`](docs/package-layout.md).
-2. **Create a branch off `main`.** We don't use feature flags or long-lived branches.
-3. **Run the relevant test suite locally** before opening the PR. Each subproject's `pytest tests/ -q` is fast (under a second on a recent laptop).
-4. **Run [gitleaks](https://github.com/gitleaks/gitleaks)** before committing. We don't depend on git pre-commit hooks. If you have the `/pre-commit` slash command available, use that.
-5. **Open the PR with a clear description** that links the issue number and references the design doc. Reviewers check the design first, then the diff.
-6. **Expect review from a maintainer.** Maintainers review and merge all PRs.
-7. **Be ready to iterate.** We optimize for the right design, not the fastest merge.
+1. **Read the relevant design doc first.** Most subsystems have one in `docs/`. If you're touching the agent-memory-ergonomics work, read [`docs/agent-memory-ergonomics/design.md`](docs/agent-memory-ergonomics/design.md). If you're touching auth, read [`docs/design/governance.md`](docs/design/governance.md). If you're touching the package layout, see the repo-layout section above (historical record of the #55 rename: [`planning/archive/package-layout.md`](planning/archive/package-layout.md)).
+2. **Create a branch off `main`.** We don't use feature flags or long-lived branches. Branch names: `<subsystem>/<short-description>` (e.g. `sdk/fix-focus-param`) or `issue-NN-<short-description>`.
+3. **Keep PRs small and single-purpose.** One issue per PR where possible. If a change grows past ~500 lines of non-generated diff, consider splitting it — small PRs get reviewed faster and reverted more safely.
+4. **Run the relevant test suite locally** before opening the PR. Each subproject's `pytest tests/ -q` is fast (under a second on a recent laptop).
+5. **CI must pass before merge.** GitHub Actions runs the test matrix (`.github/workflows/test.yml`), version-consistency checks, and secret scanning on every PR. Local green is not a substitute — a PR with failing CI will not be merged.
+6. **Don't commit secrets.** CI runs [gitleaks](https://github.com/gitleaks/gitleaks) on every PR; running it locally before pushing (`gitleaks detect --source .`) saves you a round-trip. We don't depend on git pre-commit hooks. (Maintainers with the project agent tooling can use the `/pre-commit` slash command.)
+7. **Open the PR with a clear description** that links the issue number and references the design doc. Fill in the PR template. Reviewers check the design first, then the diff.
+8. **Expect review from a maintainer.** Review and merge rules (approval count, maintainer self-merge policy) are in [`MAINTAINERS.md`](MAINTAINERS.md).
+9. **Update `CHANGELOG.md`** in the same PR for any user-visible change to a released component (SDK, CLI, MCP server). Releases are cut by tagging (`sdk/vX.Y.Z`, `mcp/vX.Y.Z`, `memoryhub-cli/vX.Y.Z`); `.github/workflows/version-check.yml` enforces version consistency and `release.yml` publishes.
+10. **Be ready to iterate.** We optimize for the right design, not the fastest merge.
 
 ## Commit messages
 
@@ -118,12 +127,12 @@ Examples from the actual log:
 - `mcp-server: Add mode/token-budget and branch-handling to search_memory`
 - `sdk: Add .memoryhub.yaml schema and surface new search params (#59, #73)`
 - `memoryhub-cli: Add 'memoryhub config init' for project setup (#60)`
-- `#58: Add session focus vector with two-vector retrieval (Layer 2)`
-- `#55: Rename server-side memoryhub package to memoryhub_core`
+
+(You may find older commits in the log using an issue-number prefix like `#58: ...` — that style predates this guide; use the `subsystem:` prefix for new commits.)
 
 Imperative mood: write "Add foo" not "Adds foo" or "Added foo." Body explains why; the diff explains what.
 
-If your commit was assisted by an AI tool, add an `Assisted-by:` trailer (e.g., `Assisted-by: Claude Code (Opus 4.6)`). Do not add `Co-authored-by:` or `Signed-off-by:` trailers — the human author is the sole author of record. The signoff is for the human to add manually before pushing if their workflow requires it.
+If your commit was assisted by an AI tool, add an `Assisted-by:` trailer (e.g., `Assisted-by: Claude Code (Opus 4.6)`). Do not add `Co-authored-by:` trailers for AI tools — the human author is the author of record. `Co-authored-by:` is fine (and encouraged) for human pairing. This project does not require a DCO sign-off or CLA; contributions are accepted under the inbound=outbound Apache-2.0 terms in the License section below. `Signed-off-by:` trailers are optional — add one manually if your own workflow requires it, but don't let tooling add it for you.
 
 **Commit author identity.** Your commits' `Author` field must be your real Git identity (your name and an email tied to your GitHub account), not an automation or agent tool's identity. If your tooling commits under a bot account by default (for example `bot@ambient-code.local`), set `git config user.name` and `git config user.email` for this repo before pushing. We use the author field for contributor recognition and `git log --author` queries; bot identities break both. If you only notice after pushing, `git commit --amend --reset-author` followed by a force-push fixes it.
 
@@ -151,7 +160,7 @@ grep -rn 'old_field_name' memoryhub-ui/backend/ sdk/ memoryhub-cli/
 
 If anything matches, update it in the same commit. If nothing matches, the change is safe to land.
 
-The current consumer-priority tier list lives in the project's MemoryHub memory; if you're working on this repo with an agent, the agent already has it loaded.
+Consumer priority order (check in this order): `memoryhub-ui/backend/` (breaks visibly on the dashboard), then `sdk/` (published — breakage reaches external users), then `memoryhub-cli/`. If this order changes, update it here — this file is the source of truth for contributors without access to the project's agent memory.
 
 ## Mock-vs-real test discipline
 
@@ -163,7 +172,7 @@ A 100%-line-covered unit test suite is **not** sufficient evidence that a server
 Two takeaways:
 
 - **For new code that touches embeddings or pgvector**, add an integration test in `tests/integration/test_pgvector.py`. The integration suite already runs against real PostgreSQL via podman-compose.
-- **For deploys**, run `mcp-test-mcp` against the deployed pod to verify the changed code paths actually work end-to-end. The project-local `/deploy-mcp` slash command in `memory-hub-mcp/.claude/commands/deploy-mcp.md` already enforces this.
+- **For deploys**, run `mcp-test-mcp` against the deployed pod to verify the changed code paths actually work end-to-end. The project-local `/deploy-mcp` slash command in `memory-hub-mcp/.claude/commands/deploy-mcp.md` already enforces this; if you're not using the agent tooling, that file doubles as the manual deploy-and-verify checklist — follow its steps by hand.
 
 The full mock-vs-real boundary audit is in the [#58 retrospective](retrospectives/2026-04-07_session-focus-vector-58/RETRO.md) under "Patterns."
 

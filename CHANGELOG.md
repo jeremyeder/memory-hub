@@ -105,13 +105,13 @@ OpenShift; not published as a package.
 
 ## memoryhub-core (server-side library)
 
-Lives at the repo root in [`src/memoryhub/`](src/memoryhub/). Consumed by
+Lives at the repo root in [`src/memoryhub_core/`](src/memoryhub_core/). Consumed by
 memory-hub-mcp and memoryhub-auth; not published as a standalone package.
 
 ### [Unreleased]
 
 - Models, services, storage, and RBAC. See
-  [docs/package-layout.md](docs/package-layout.md) for the split between
+  [planning/archive/package-layout.md](planning/archive/package-layout.md) for the split between
   `memoryhub-core` (server) and `memoryhub` (SDK on PyPI).
 
 ## memoryhub-auth

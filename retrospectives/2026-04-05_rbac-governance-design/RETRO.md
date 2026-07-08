@@ -9,7 +9,7 @@
 
 From the NEXT_SESSION.md prompt:
 1. Merge #7 and #13 into a unified governance design
-2. Design RBAC enforcement mechanism in docs/governance.md
+2. Design RBAC enforcement mechanism in docs/design/governance.md
 3. Verify Authorino AuthConfig API version on cluster (#22)
 4. Close out with commits and retro
 

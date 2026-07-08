@@ -2,7 +2,7 @@
 
 MemoryHub's admin model follows a single design principle: **every admin operation is a function in a core Python library, and authorization and audit happen inside that function**. The function is the canonical surface. Transports -- MCP tools, FastAPI BFF routes, background workers, a future break-glass CLI -- are thin wrappers that authenticate their caller, build an `Identity` object, and invoke the core function. Because every transport calls the same code, every transport produces identical authorization checks and identical audit log entries.
 
-This is governance-first, transport-agnostic. Admin actions get the same guarantees regardless of how they were invoked: identity-based authorization, scope checks, and immutable audit logging via the existing [governance](../governance.md) infrastructure. The core does not know or care which transport called it.
+This is governance-first, transport-agnostic. Admin actions get the same guarantees regardless of how they were invoked: identity-based authorization, scope checks, and immutable audit logging via the existing [governance](../design/governance.md) infrastructure. The core does not know or care which transport called it.
 
 ## Why Multiple Transports
 
@@ -51,8 +51,8 @@ Admin capabilities are organized into three domains, each with its own design do
 
 Admin operations build on infrastructure already defined in the project's design documents rather than introducing new mechanisms:
 
-- RBAC enforcement and the `memory:admin` scope are defined in [governance.md](../governance.md). The core authorization module consumes these but does not redefine them.
-- The immutable audit trail schema (`audit_log` table) is defined in [governance.md](../governance.md) and [storage-layer.md](../storage-layer.md). The core audit module is the only writer for admin operations.
-- The curation rules engine and layer model are defined in [curator-agent.md](../curator-agent.md).
-- MCP tool patterns and error handling conventions are defined in [mcp-server.md](../mcp-server.md). These apply to the MCP transport wrapper, not to the core.
+- RBAC enforcement and the `memory:admin` scope are defined in [governance.md](../design/governance.md). The core authorization module consumes these but does not redefine them.
+- The immutable audit trail schema (`audit_log` table) is defined in [governance.md](../design/governance.md) and [storage-layer.md](../design/storage-layer.md). The core audit module is the only writer for admin operations.
+- The curation rules engine and layer model are defined in [curator-agent.md](../design/curator-agent.md).
+- MCP tool patterns and error handling conventions are defined in [mcp-server.md](../design/mcp-server.md). These apply to the MCP transport wrapper, not to the core.
 - The dashboard BFF that talks directly to PostgreSQL lives at `memoryhub-ui/backend/`. It will gain admin routes that import the core library directly rather than calling MCP.

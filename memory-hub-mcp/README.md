@@ -9,7 +9,7 @@ it is **not** published to PyPI or a container registry. For the SDK on
 PyPI, see [`sdk/`](../sdk/). For the CLI, see
 [`memoryhub-cli/`](../memoryhub-cli/). For the full architecture, see
 [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) and
-[`docs/mcp-server.md`](../docs/mcp-server.md).
+[`docs/design/mcp-server.md`](../docs/design/mcp-server.md).
 
 ## Tools
 
@@ -274,7 +274,7 @@ cmcp ".venv/bin/python -m src.main" tools/call register_session '{"api_key": "mh
 make deploy PROJECT=<openshift-project>
 ```
 
-See [`docs/build-deploy-hardening.md`](../docs/build-deploy-hardening.md)
+See [`docs/build-deploy-hardening.md`](../docs/admin/build-deploy-hardening.md)
 for the deployment invariants that apply across all MemoryHub components
 (base image, file permissions, FIPS posture, health checks).
 
@@ -350,15 +350,15 @@ The SDK classifies errors by message prefix into typed exceptions:
 | contains `"already exists"` or `"already deleted"` | `ConflictError` |
 | starts with `"invalid "`, or contains `" must be "` or `"cannot be empty"` | `ValidationError` |
 
-See [`planning/tool-error-standardization.md`](../planning/tool-error-standardization.md)
+See [`planning/tool-error-standardization.md`](../planning/archive/tool-error-standardization.md)
 for the full design note.
 
 ## Further reading
 
 - [Architecture](../docs/ARCHITECTURE.md) — system design, deployment topology, data flow
-- [MCP server design](../docs/mcp-server.md) — FastMCP 3 bring-up, tool catalog history, transport decisions
-- [Memory tree](../docs/memory-tree.md) — the tree/branch data model these tools operate on
+- [MCP server design](../docs/design/mcp-server.md) — FastMCP 3 bring-up, tool catalog history, transport decisions
+- [Memory tree](../docs/design/memory-tree.md) — the tree/branch data model these tools operate on
 - [Agent memory ergonomics](../docs/agent-memory-ergonomics/design.md) — the design behind `search_memory`'s parameters
-- [Governance](../docs/governance.md) — scopes, ownership, tenant isolation, audit
-- [Curator agent](../docs/curator-agent.md) — the pipeline behind curation rules, similarity checks, and merge suggestions
-- [Package layout](../docs/package-layout.md) — how `memory-hub-mcp`, `memoryhub-core`, and the SDK fit together
+- [Governance](../docs/design/governance.md) — scopes, ownership, tenant isolation, audit
+- [Curator agent](../docs/design/curator-agent.md) — the pipeline behind curation rules, similarity checks, and merge suggestions
+- [Package layout](../planning/archive/package-layout.md) — how `memory-hub-mcp`, `memoryhub-core`, and the SDK fit together

@@ -50,3 +50,8 @@ medium_article_1.pdf
 # Specs in progress
 specs/
 
+
+# Terminology audit findings (local scratch)
+findings.md
+COMMIT_PLAN.md
+terminology.md

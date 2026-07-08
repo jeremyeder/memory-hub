@@ -4,9 +4,9 @@
 
 ## Problem
 
-Admins need to create, edit, and delete curation and filter rules at the system and organizational layers. The [curation pipeline](../curator-agent.md) defines a three-layer rule model (system, organizational, user) where higher layers can override lower ones. Users manage their own rules via `manage_curation(action="set_rule", ...)`. Admins manage the rules that users cannot: system defaults that enforce security baselines, and organizational rules that reflect company policy.
+Admins need to create, edit, and delete curation and filter rules at the system and organizational layers. The [curation pipeline](../design/curator-agent.md) defines a three-layer rule model (system, organizational, user) where higher layers can override lower ones. Users manage their own rules via `manage_curation(action="set_rule", ...)`. Admins manage the rules that users cannot: system defaults that enforce security baselines, and organizational rules that reflect company policy.
 
-This is the admin view of the same `curator_rules` table and evaluation logic defined in [curator-agent.md](../curator-agent.md). The difference is scope, not mechanism.
+This is the admin view of the same `curator_rules` table and evaluation logic defined in [curator-agent.md](../design/curator-agent.md). The difference is scope, not mechanism.
 
 ## Operations
 
@@ -126,7 +126,7 @@ The asymmetry exists because admins editing user-layer rules silently would unde
 
 ## Relationship to Curation Pipeline
 
-These operations work against the same `curator_rules` table defined in [curator-agent.md](../curator-agent.md). The rule schema, evaluation logic, and layer merging behavior are all defined there. Admin operations add no new evaluation semantics -- they just provide CRUD access to layers that regular users cannot reach.
+These operations work against the same `curator_rules` table defined in [curator-agent.md](../design/curator-agent.md). The rule schema, evaluation logic, and layer merging behavior are all defined there. Admin operations add no new evaluation semantics -- they just provide CRUD access to layers that regular users cannot reach.
 
 The rule evaluation order remains the same regardless of whether a rule was created by an admin tool or shipped as a default:
 

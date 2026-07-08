@@ -6,11 +6,11 @@ designed for FastMCP 2 and doesn't register tools correctly in v3.
 
 Tool profiles (MEMORYHUB_TOOL_PROFILE env var):
 
-  compact  — register_session + memory + thread (3 tools).
+  compact  — register_session + memory + thread + admin_memory (4 tools).
              Action-dispatch with options dict. Best for frontier models
              (Claude, GPT-4) where tool count is the constraint.
 
-  full     — register_session + 11 flat-param tools (12 tools).
+  full     — register_session + 12 flat-param tools (13 tools).
              Each operation is a separate tool with typed parameters.
              Best for mid-range models that need schema discoverability.
 

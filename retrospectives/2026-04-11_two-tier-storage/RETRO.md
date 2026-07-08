@@ -7,7 +7,7 @@
 
 ## What We Set Out To Do
 
-Implement the two-tier storage design from `docs/storage-layer.md`: S3 adapter, threshold-based routing, read-time hydration, version chain semantics, and tests. The issue listed 5 open design questions to resolve first.
+Implement the two-tier storage design from `docs/design/storage-layer.md`: S3 adapter, threshold-based routing, read-time hydration, version chain semantics, and tests. The issue listed 5 open design questions to resolve first.
 
 Also planned: #62 (Pattern E push filter) if time allowed, plus setting up #168 for next session.
 

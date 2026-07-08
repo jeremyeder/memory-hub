@@ -11,7 +11,7 @@
 
 Two things. First, close #88 — the build/deploy/image-resolution failure family that had surfaced across four retros in two days (#9, #12, #14, #18). Each prior retro had proposed a partial fix; none generalized, and each fix was re-discovered on the next component's deploy. The forcing-function rule from earlier retros said: recurring items are decisions, not TODOs — force the decision. Land it fully.
 
-Second, move to #46 (tenant isolation). Memory-hub-auth had been issuing JWTs with `tenant_id` since day one, and `core/authz.py` read the claim — but never compared or filtered on it. A silent data leak in any multi-tenant deployment. The issue body was well-specified and the design lived in `docs/governance.md`. Plan going in: seven phases (migration → authz → service writes → service reads → cross-tenant tests → BFF → deploy), landed as a single atomic commit.
+Second, move to #46 (tenant isolation). Memory-hub-auth had been issuing JWTs with `tenant_id` since day one, and `core/authz.py` read the claim — but never compared or filtered on it. A silent data leak in any multi-tenant deployment. The issue body was well-specified and the design lived in `docs/design/governance.md`. Plan going in: seven phases (migration → authz → service writes → service reads → cross-tenant tests → BFF → deploy), landed as a single atomic commit.
 
 ## What changed
 

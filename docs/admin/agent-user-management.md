@@ -152,7 +152,7 @@ The same pattern applies to behavioral-anomaly workers calling `lock_agent` and 
 
 ## Relationship to Auth Architecture
 
-Lock and unlock operations interact with the JWT lifecycle defined in [governance.md](../governance.md). When an agent is locked:
+Lock and unlock operations interact with the JWT lifecycle defined in [governance.md](../design/governance.md). When an agent is locked:
 
 1. The agent's identity is added to the lock table (checked on every request).
 2. Any refresh tokens for the agent are invalidated, preventing JWT renewal.

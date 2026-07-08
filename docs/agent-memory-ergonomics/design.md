@@ -5,7 +5,6 @@ How memory-hub feels from the consuming agent's perspective, and what design cha
 **Status: All three layers shipped 2026-04-07; Pattern E shipped 2026-04-08.** Layer 1 (search shape, #56/#57) and Layer 3 (project config + CLI, #59/#60/#73) shipped earlier on 2026-04-07. Layer 2 (session focus vector with two-vector retrieval, #58) shipped at the end of the same day -- a cross-encoder reranker (`ms-marco-MiniLM-L12-v2`) was deployed mid-session and the design space pivoted to NEW-1 (RRF blend over cross-encoder rerank). Pattern E real-time push (#62) shipped 2026-04-08 with memory-hub's own subscriber pipeline rather than reusing FastMCP's built-in queue (the built-in subscriber's method whitelist forced a parallel implementation -- see Candidate 7 below). The agent-memory-ergonomics concept now closes with all 7/7 candidates landed. Per-candidate status markers live in the [Implementation Candidates](#implementation-candidates) section.
 
 **Companion documents:**
-- [`overview.md`](overview.md) — Narrative landing page for the effort.
 - [`agent-memory-ergonomics-open-questions.md`](../../planning/agent-memory-ergonomics-open-questions.md) — Tracked list of unresolved design questions, with what would resolve each.
 - [`fastmcp-3-push-notifications.md`](../../research/agent-memory-ergonomics/fastmcp-3-push-notifications.md) — Evidence behind the Pattern E (real-time push) feasibility claims.
 - [`two-vector-retrieval.md`](../../research/agent-memory-ergonomics/two-vector-retrieval.md) — Ranking math options for session-focus biasing (#58).
@@ -13,12 +12,34 @@ How memory-hub feels from the consuming agent's perspective, and what design cha
 
 ## Context
 
-memory-hub provides 10 MCP tools, but tools without policy don't get used well. Two distinct problems shape the agent experience today:
+This is the design artifact for the agent-memory-ergonomics effort: making memory-hub usable — not just functional — from the consuming agent's perspective. memory-hub's MCP tools cover every operation an agent needs, but tools without policy don't get used well, and response shapes that are "technically correct" can still force agents into multi-round-trip dances or silent misses. Seven GitHub issues (#56–#62) pulled implementation from this doc.
+
+### Why the effort started
+
+Two forcing functions converged in early April 2026:
+
+1. **The `/exercise-tools` session on 2026-04-06** surfaced seven structural issues with the Phase 1/2 tool set, most of them about response shape (empty results from `manage_graph(action="get_similar", ...)`, `total_accessible` ambiguity, `read_memory`'s `depth` footgun, etc.). Those fixes landed in the 2026-04-07 Wave 1–4 session (see `retrospectives/2026-04-07_wave1-4-mcp-fixes/RETRO.md`). While fixing them, a second, deeper category of issues surfaced: the tools were fine but the *loading patterns* around them were underdefined.
+2. **Kagenti integration research** started in parallel. Swarm-style deployments have fundamentally different memory-loading needs than the single-developer single-thread workflow memory-hub had been tuned for. Sitting down to write the kagenti integration docs made it clear that "how should agents actually use memory-hub" was not something we had an answer for.
+
+### The two core concerns
+
+Two distinct problems shape the agent experience:
 
 1. **Response shape.** When an agent calls `search_memory`, what comes back determines whether the agent has the context it needs in one round-trip, or has to make follow-up calls, or wastes tokens on things it didn't need. Today's response is "full inline content for everything matching, ranked by similarity, including branches as independent top-level results." That works at the current scale (~30-50 memories per user) but has rough edges that will get worse.
 2. **Loading policy.** Tools are mechanism. The *when* and *how* of calling them lives in agent instructions (CLAUDE.md, `.claude/rules/`, system prompts). Today every project hand-writes its own rule for memory loading. memory-hub could ship a configuration moment that generates the right rule for the project's workflow shape.
 
 These are separate problems but they interact. A project that runs broad multi-domain sessions wants both eager loading *and* full content in responses. A project that runs tightly-scoped single-thread sessions wants lazy loading *and* possibly stubbed responses with on-demand expansion. Configuring one without the other leaves money on the table.
+
+### How the pieces compose
+
+The design organizes into three concentric layers, plus two Phase 2 items on top:
+
+- **Layer 1 — Response shape knobs** are pure server-side changes to `search_memory`. They shipped first because they're low-risk, well-scoped, and unblock the higher layers. Tracked as #56 (branch nesting) and #57 (token budget + mode).
+- **Layer 2 — Session focus and retrieval biasing** introduces a session-wide focus vector that biases retrieval toward declared or inferred topics — between "hand-written topic tags" (brittle) and "load everything always" (wasteful). Tracked as #58; the ranking math has its own research file.
+- **Layer 3 — Project configuration and rule generation** is the user-facing output: `memory-hub config init` walks a project through a few questions about session shape, writes `.memoryhub.yaml`, and generates `.claude/rules/memoryhub-loading.md` per loading pattern. Tracked as #59 (schema) and #60 (CLI).
+- **Phase 2:** Pattern E real-time push (#62), which reuses Layer 2's focus vector to pre-filter broadcasts, and session focus history as a usage signal (#61).
+
+Per-candidate status with commit pointers lives in the [Implementation Candidates](#implementation-candidates) section below. The retrospective for the Layer 2 work (#58) is at [`retrospectives/2026-04-07_session-focus-vector-58/RETRO.md`](../../retrospectives/2026-04-07_session-focus-vector-58/RETRO.md).
 
 ## Search Response Shape
 
@@ -304,7 +325,7 @@ This design generates several implementation candidates. Each gets a backlog iss
 
 ## Cache-Optimized Memory Assembly
 
-Patterns A-E describe *when* to fetch memories. This section describes *how* to assemble fetched memories into the prompt for maximum KV cache efficiency. See `research/vllm-cache-optimization.md` for the full investigation.
+Patterns A-E describe *when* to fetch memories. This section describes *how* to assemble fetched memories into the prompt for maximum KV cache efficiency. See `research/infra/vllm-kv-cache.md` for the full investigation.
 
 ### The principle
 
@@ -397,9 +418,9 @@ This is "free" performance: MemoryHub structures output deterministically, llm-d
 
 ## Cross-references
 
-- `../mcp-server.md` — current tool surface, including `search_memory` parameters and response shape
-- `../memory-tree.md` — branch model (rationale, provenance) that motivates the branch-handling discussion
-- `../storage-layer.md` — pgvector usage that the two-vector retrieval proposal builds on
+- `../design/mcp-server.md` — current tool surface, including `search_memory` parameters and response shape
+- `../design/memory-tree.md` — branch model (rationale, provenance) that motivates the branch-handling discussion
+- `../design/storage-layer.md` — pgvector usage that the two-vector retrieval proposal builds on
 - `../../.claude/rules/memoryhub-integration.md` — current hand-written loading rule, the manual precursor to the generated rule file
 
 ## History

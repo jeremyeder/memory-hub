@@ -1,44 +1,50 @@
 # MemoryHub Documentation
 
-MemoryHub is a Kubernetes-native agent memory component for OpenShift AI. See the [root README](../README.md) for the project overview and the three ways to use it.
+MemoryHub is a Kubernetes-native agent memory component for OpenShift AI. See the [root README](../README.md) for the project overview.
 
-This directory holds shipped architecture and user-facing reference material. In-flight designs, research notes, and demo scripts live in sibling directories — see the bottom of this page.
+This directory holds shipped architecture and user-facing reference material, organized as: `design/` (subsystem designs — the source of truth for shipped architecture), `guides/` (integrator and user guides), plus topic folders for auth, admin, identity, UI, and runbooks. In-flight designs live in [`../planning/`](../planning/), research in [`../research/`](../research/).
 
 ## Start here
 
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — System architecture, deployment topology, and the "why" behind the major design choices.
-- [`SYSTEMS.md`](SYSTEMS.md) — Per-subsystem inventory with status (shipped, in-flight, roadmap).
-- [`package-layout.md`](package-layout.md) — How `memoryhub-core`, `memoryhub`, and the other distribution packages fit together.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — System architecture, consumer surfaces, deployment topology, and the "why" behind the major design choices.
+- [`SYSTEMS.md`](SYSTEMS.md) — Per-subsystem inventory with status (shipped, in-flight, roadmap) and downstream consumers.
 
-## Subsystem designs (shipped architecture)
+## Subsystem designs ([`design/`](design/))
 
-- [`governance.md`](governance.md) — Memory governance model: scopes, visibility, ownership, tenant isolation.
-- [`memory-tree.md`](memory-tree.md) — Tree/branch model, versioning with `isCurrent`, rationale and provenance branches.
-- [`storage-layer.md`](storage-layer.md) — PostgreSQL + pgvector schema, row-level security, migration conventions.
-- [`curator-agent.md`](curator-agent.md) — Curator agent design for duplicate detection, merge suggestions, and rule-driven curation.
-- [`mcp-server.md`](mcp-server.md) — FastMCP 3 server design, tool shapes, streamable-http transport, session handling.
-- [`build-deploy-hardening.md`](build-deploy-hardening.md) — Build and deploy invariants shared across all MemoryHub components.
+- [`memory-tree.md`](design/memory-tree.md) — Tree/branch model, versioning, weights, rationale and provenance branches.
+- [`storage-layer.md`](design/storage-layer.md) — PostgreSQL + pgvector schema, MinIO, migration conventions, storage FAQ/rationale.
+- [`governance.md`](design/governance.md) — Scopes, visibility, ownership, tenant isolation, RBAC.
+- [`mcp-server.md`](design/mcp-server.md) — FastMCP 3 server, tool profiles, transport, session handling.
+- [`curator-agent.md`](design/curator-agent.md) — Inline curation pipeline and rules engine.
+- [`two-vector-retrieval.md`](design/two-vector-retrieval.md) — Query + focus retrieval via RRF, cross-encoder rerank, pivot detection, temporal awareness (#282/#292).
+- [`graph-enhanced-memory.md`](design/graph-enhanced-memory.md) — Entity extraction (POLE+O), relationships, graph queries.
+- [`conversation-persistence.md`](design/conversation-persistence.md) — Governed threads, extraction pipeline, retention (#168).
+- [`context-compaction.md`](design/context-compaction.md) — Governed thread compaction (#169).
+- [`knowledge-compilation.md`](design/knowledge-compilation.md) — Compiled-article knowledge pipeline (#171).
+- [`context-assembly-at-inference.md`](design/context-assembly-at-inference.md) — Assembling memory into prompts at inference time.
+- [`projects-lifecycle.md`](design/projects-lifecycle.md) — Projects feature: lifecycle, enrollment, membership. (Repo governance is [MAINTAINERS.md](../MAINTAINERS.md).)
 
-## Agent memory ergonomics
+## Guides ([`guides/`](guides/))
 
-- [`two-vector-retrieval.md`](two-vector-retrieval.md) — How the two-vector retrieval pipeline works: query + session focus blended via RRF with cross-encoder reranking and pivot detection.
-- [`agent-memory-ergonomics/overview.md`](agent-memory-ergonomics/overview.md) — Concept overview: what problem the ergonomics work solves and how the pieces fit.
-- [`agent-memory-ergonomics/design.md`](agent-memory-ergonomics/design.md) — Full design cluster: search shape, session focus vector, cross-encoder reranking, loading patterns, real-time push.
+- [`agent-integration-guide.md`](guides/agent-integration-guide.md) — How agents use MemoryHub (loading patterns, session lifecycle) plus the full integration reference. Start here to wire up an agent.
+- [`hooks-integration.md`](guides/hooks-integration.md) — SessionStart/hook-based memory injection for agent harnesses.
+- [`local-development.md`](guides/local-development.md) — Running MemoryHub locally.
+- [`ogx-integration.md`](guides/ogx-integration.md) — Giving an OGX (LlamaStack) agent memory via the MCP connector.
 
-## Auth
+## Topic folders
 
-- [`auth/README.md`](auth/README.md) — OAuth 2.1 auth service and JWT verification. Start here, then follow links to the LibreChat integration and the OpenShift broker work.
-
-## Admin operations
-
-- [`admin/README.md`](admin/README.md) — Administrative controls: agent and user management, content moderation, filter rules.
-
-## Identity model
-
-- [`identity-model/README.md`](identity-model/README.md) — The owner/actor/driver triple, project-scope membership, audit logging, and the agent-generation CLI.
+- [`auth/`](auth/README.md) — OAuth 2.1 auth service, LibreChat integration, OpenShift broker.
+- [`admin/`](admin/README.md) — Agent/user management, content moderation, filter rules, contributor cluster access, build/deploy hardening.
+- [`identity-model/`](identity-model/README.md) — Owner/actor/driver triple, authorization, data model.
+- [`agent-memory-ergonomics/`](agent-memory-ergonomics/design.md) — The ergonomics design cluster (search shape, focus vector, loading patterns); research half in [`../research/agent-memory-ergonomics/`](../research/agent-memory-ergonomics/).
+- [`ui/`](ui/design.md) — Dashboard design.
+- [`runbooks/`](runbooks/) — Operational runbooks (e.g. adding an MCP API user).
+- `public/` — GitHub Pages artifact (`discovery.json` endpoint discovery); not documentation.
 
 ## Related directories
 
-- [`../planning/`](../planning/) — In-flight designs for unimplemented features (operator, observability, org-ingestion, session-persistence) and the kagenti and LlamaStack integration plans. Also houses the agent-memory-ergonomics open-questions tracker.
-- [`../research/`](../research/) — Investigations and explorations: FIPS storage evaluation, agent-memory-ergonomics research papers (two-vector retrieval benchmark, pivot detection, FastMCP 3 push notifications), Claude Code JWT limitations.
-- [`../demos/`](../demos/) — Conference demo scripts (HIMSS, RSA, IACP, IAEM, World AgriTech) and the RHOAI dashboard demo material.
+- [`../planning/`](../planning/) — In-flight designs (see its README for the active/archive split).
+- [`../research/`](../research/) — Consolidated research with status index.
+- [`../demos/`](../demos/) — Demo scripts and scenario material.
+- [`../retrospectives/`](../retrospectives/) — Session retros; the project's institutional memory.
+- Historical: [`../ideas/memoryhub-inception.md`](../ideas/memoryhub-inception.md) (origin document), [`../planning/archive/package-layout.md`](../planning/archive/package-layout.md) (#55 rename record).

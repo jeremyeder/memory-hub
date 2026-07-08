@@ -223,11 +223,11 @@ The two modes are mutually exclusive. If both are provided, the constructor rais
 The SDK is one surface of the [memory-hub](https://github.com/redhat-ai-americas/memory-hub) monorepo. For deeper context:
 
 - **[Architecture overview](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/ARCHITECTURE.md)** — System design, deployment topology, data flow
-- **[MCP server tool reference](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/mcp-server.md)** — The 14 tools the SDK wraps, with parameter reference
-- **[Memory tree data model](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/memory-tree.md)** — How scopes, branches, and versioning work
-- **[Governance and authorization](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/governance.md)** — RBAC, scope-based access, audit trail
+- **[MCP server tool reference](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/design/mcp-server.md)** — The 14 tools the SDK wraps, with parameter reference
+- **[Memory tree data model](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/design/memory-tree.md)** — How scopes, branches, and versioning work
+- **[Governance and authorization](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/design/governance.md)** — RBAC, scope-based access, audit trail
 - **[Agent memory ergonomics design](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/agent-memory-ergonomics/design.md)** — Full `.memoryhub.yaml` schema, retrieval defaults, session focus, and loading patterns
-- **[Package layout](https://github.com/redhat-ai-americas/memory-hub/blob/main/docs/package-layout.md)** — How `memoryhub` (this SDK) relates to `memoryhub-core` (server-side library) and `memoryhub-cli`
+- **[Package layout](https://github.com/redhat-ai-americas/memory-hub/blob/main/planning/archive/package-layout.md)** — How `memoryhub` (this SDK) relates to `memoryhub-core` (server-side library) and `memoryhub-cli`
 
 ## Links
 
