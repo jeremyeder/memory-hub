@@ -455,14 +455,31 @@ This project uses MemoryHub for persistent, centralized agent memory.
 _OGX_SNIPPET = """\
 ## OGX Integration
 
-Add the following to your OGX `run.yaml` under `tool_groups`:
+Add the following to your OGX `run.yaml` under `connectors` (OGX 0.7+):
 
 ```yaml
-# Add to your OGX run.yaml under tool_groups:
-#   - provider_id: memoryhub
-#     provider_type: remote::model-context-protocol
-#     config:
-#       url: "${MEMORYHUB_MCP_URL}"
+connectors:
+  - connector_id: memoryhub
+    provider_id: model-context-protocol
+    url: ${MEMORYHUB_MCP_URL}
+```
+
+Ensure `tool_runtime` includes the MCP provider:
+
+```yaml
+providers:
+  tool_runtime:
+    - provider_id: model-context-protocol
+      provider_type: remote::model-context-protocol
+```
+
+Then in your Responses API calls, include the MCP tools:
+
+```json
+{
+  "tools": [{"type": "mcp", "server_label": "memoryhub",
+             "server_url": "<MEMORYHUB_MCP_URL>"}]
+}
 ```
 """
 
