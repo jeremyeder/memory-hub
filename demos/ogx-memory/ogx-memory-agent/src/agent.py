@@ -131,10 +131,12 @@ async def chat_completions(request: ChatRequest):
 
 @app.get("/v1/memories")
 async def list_memories(limit: int = 20):
-    if not _mh_client:
-        return {"memories": [], "error": "MemoryHub client not configured"}
+    mh_url = os.environ.get("MEMORYHUB_URL", "")
+    if not _api_key or not mh_url:
+        return {"memories": [], "error": "MemoryHub not configured"}
     try:
-        result = await _mh_client.list(max_results=limit, current_only=True)
+        async with MemoryHubClient(server_url=mh_url, api_key=_api_key) as client:
+            result = await client.list(max_results=limit, current_only=True)
         memories = []
         for m in result.get("memories", []):
             memories.append({
