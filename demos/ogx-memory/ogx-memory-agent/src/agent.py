@@ -36,8 +36,15 @@ class OGXMemoryAgent(BaseAgent):
     async def setup(self) -> None:
         await super().setup()
         raw_name = os.environ.get("OGX_MODEL_NAME", "")
-        if raw_name and hasattr(self, "llm") and hasattr(self.llm, "_config"):
-            self.llm._config.name = raw_name
+        if raw_name and hasattr(self, "llm"):
+            original = self.llm._base_kwargs
+
+            def patched_base_kwargs(**overrides):
+                kwargs = original(**overrides)
+                kwargs["model"] = raw_name
+                return kwargs
+
+            self.llm._base_kwargs = patched_base_kwargs
 
     async def step(self) -> StepResult:
         response = await self.call_model()
