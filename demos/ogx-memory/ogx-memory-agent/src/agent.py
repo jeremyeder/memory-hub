@@ -1,21 +1,23 @@
 """OGX Memory Demo Agent -- persistent memory via MemoryHub.
 
-Direct-to-vLLM with framework memory injection for reads. Writes are
-handled in application code: after every turn, a second LLM call
-decides if the user stated something worth remembering, and if so,
-writes it to MemoryHub via the MCP tool.
+Direct-to-vLLM with framework memory injection for reads.
 
-This bypasses the unreliable tool-calling behavior of small models.
+Writes are handled via a FastAPI middleware that runs after each chat
+completion: extracts memorable facts from the user's message using a
+cheap LLM call, then writes to MemoryHub via the SDK.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 
 from fipsagents.baseagent import BaseAgent, StepResult, load_config
 from memoryhub import MemoryHubClient
+
+import httpx
 
 log = logging.getLogger(__name__)
 
@@ -41,61 +43,65 @@ class OGXMemoryAgent(BaseAgent):
     async def step(self) -> StepResult:
         response = await self.call_model()
         response = await self.run_tool_calls(response)
-
-        # After the model responds, check if the user said something
-        # worth remembering and write it programmatically.
-        await self._maybe_write_memory()
-
         return StepResult.done(result=response.content)
 
-    async def _maybe_write_memory(self) -> None:
-        """Use a cheap LLM call to extract memorable facts from the
-        user's last message, then write them via the memory tool."""
-        user_msgs = [m for m in self.messages if m.get("role") == "user"]
-        if not user_msgs:
-            return
-        last_user = user_msgs[-1].get("content", "")
-        if len(last_user) < 10:
-            return
 
-        extract_prompt = [
-            {"role": "system", "content": (
-                "Extract any personal preference, decision, or fact the user "
-                "stated about themselves. Return ONLY a JSON object: "
-                '{"memory": "<one sentence>"}. '
-                "If nothing worth remembering, return "
-                '{"memory": null}. '
-                "No explanation, just the JSON."
-            )},
-            {"role": "user", "content": last_user},
-        ]
+# --- Memory extraction (runs after each chat completion) ---
 
-        try:
-            result = await self.call_model(
-                messages=extract_prompt,
-                include_tools=False,
+_api_key = os.environ.get("MEMORYHUB_API_KEY", "")
+_mh_url = os.environ.get("MEMORYHUB_URL", "")
+_model_endpoint = os.environ.get(
+    "MODEL_ENDPOINT",
+    "http://gemma4.gemma-model.svc.cluster.local/v1",
+)
+_model_name = os.environ.get("MODEL_NAME", "google/gemma-4-E4B-it")
+
+
+async def extract_and_write(user_text: str) -> None:
+    """Background task: extract a memorable fact and write to MemoryHub."""
+    if len(user_text) < 10 or not _api_key or not _mh_url:
+        return
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as http:
+            resp = await http.post(
+                f"{_model_endpoint}/chat/completions",
+                json={
+                    "model": _model_name,
+                    "messages": [
+                        {"role": "system", "content": (
+                            "Extract any personal preference, decision, or "
+                            "fact the user stated about themselves. Return "
+                            'ONLY: {"memory": "<one sentence>"} or '
+                            '{"memory": null} if nothing worth remembering.'
+                        )},
+                        {"role": "user", "content": user_text},
+                    ],
+                    "max_tokens": 100,
+                    "temperature": 0,
+                },
+                headers={"Authorization": "Bearer not-required"},
             )
-            text = (result.content or "").strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            parsed = json.loads(text)
-            memory_text = parsed.get("memory")
-            if not memory_text:
-                return
+        result = resp.json()
+        text = result["choices"][0]["message"].get("content", "").strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        parsed = json.loads(text)
+        memory_text = parsed.get("memory")
+        if not memory_text:
+            return
 
-            log.info("Writing memory: %s", memory_text[:80])
-            tool_result = await self.tools.execute(
-                "memory",
-                action="write",
-                content=memory_text,
-                scope="user",
-            )
-            log.info("Memory write result: %s", str(tool_result)[:200])
-        except Exception as e:
-            log.debug("Memory extraction skipped: %s", e)
+        log.info("Extracted memory: %s", memory_text[:80])
+        async with MemoryHubClient(server_url=_mh_url, api_key=_api_key) as client:
+            result = await client.write(memory_text, scope="user")
+            log.info("Memory written: %s", result.memory.id if result.memory else "blocked by curation")
+    except Exception as e:
+        log.debug("Memory extraction failed: %s", e)
 
 
 if __name__ == "__main__":
+    from starlette.requests import Request
+    from starlette.responses import Response
     from fipsagents.server import OpenAIChatServer
 
     config = load_config("agent.yaml")
@@ -106,15 +112,29 @@ if __name__ == "__main__":
         version=config.agent.version,
     )
 
-    api_key = os.environ.get("MEMORYHUB_API_KEY", "")
-    mh_url = os.environ.get("MEMORYHUB_URL", "")
+    @server.app.middleware("http")
+    async def memory_extraction_middleware(request: Request, call_next):
+        body_bytes = await request.body()
+        response = await call_next(request)
+
+        if request.url.path == "/v1/chat/completions" and request.method == "POST":
+            try:
+                body = json.loads(body_bytes)
+                messages = body.get("messages", [])
+                user_msgs = [m["content"] for m in messages if m.get("role") == "user"]
+                if user_msgs:
+                    asyncio.create_task(extract_and_write(user_msgs[-1]))
+            except Exception:
+                pass
+
+        return response
 
     @server.app.get("/v1/memories")
     async def list_memories(limit: int = 20):
-        if not api_key or not mh_url:
+        if not _api_key or not _mh_url:
             return {"memories": [], "error": "MemoryHub not configured"}
         try:
-            async with MemoryHubClient(server_url=mh_url, api_key=api_key) as client:
+            async with MemoryHubClient(server_url=_mh_url, api_key=_api_key) as client:
                 result = await client.search(
                     query="preferences decisions context user",
                     max_results=limit,
