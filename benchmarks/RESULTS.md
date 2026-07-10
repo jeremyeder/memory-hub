@@ -4,6 +4,18 @@ Living document tracking retrieval quality and performance across MemoryHub rele
 
 Raw result JSON files are committed alongside this document in `benchmarks/`.
 
+## Metric Definitions
+
+**Recall@k (R@k):** Of all the relevant items in the dataset, what fraction appears in the top-k results? R@5 = 0.80 means 80% of relevant items were found in the top 5. Higher is better. A system with perfect R@10 never misses a relevant item in its top-10 results.
+
+**Precision@k (P@k):** Of the top-k results returned, what fraction is actually relevant? P@10 = 0.60 means 6 of the 10 returned items were relevant. Higher is better. Precision penalizes returning irrelevant results.
+
+**MRR (Mean Reciprocal Rank):** How high does the first relevant result appear? MRR = 1.0 means the first relevant item is always rank 1. MRR = 0.5 means it's on average at rank 2. Computed as the mean of 1/rank_of_first_relevant_item across all queries. Higher is better.
+
+**NDCG@k (Normalized Discounted Cumulative Gain):** Like precision, but gives more credit for relevant items appearing higher in the ranking. A relevant item at rank 1 contributes more than one at rank 10. Normalized against the ideal ranking so the score is always 0-1.
+
+**Latency (p50/p95/p99):** The 50th/95th/99th percentile search latency in milliseconds. p50 is the median; p99 is the worst-case-excluding-outliers. Measured end-to-end from query submission to result return, including embedding, database query, reranking, and RRF blending.
+
 ## Competitive Context
 
 | System | Benchmark | R@5 | R@10 | MRR | Source |
