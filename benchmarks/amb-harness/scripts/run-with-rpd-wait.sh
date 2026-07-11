@@ -39,7 +39,7 @@ if ! lsof -i:25432 >/dev/null 2>&1; then
     sleep 2
 fi
 
-PYTHONPATH=../../src:$PYTHONPATH \
+PYTHONPATH=../../src:${PYTHONPATH:-} \
 GOOGLE_API_KEY=$GEMINI_KEY \
 OMB_ANSWER_LLM=gemini \
 OMB_JUDGE_LLM=gemini \
