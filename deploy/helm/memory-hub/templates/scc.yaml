@@ -1,0 +1,62 @@
+{{- if .Values.scc.create }}
+{{- /*
+anyuid SCC grants, declarative equivalent of:
+  oc adm policy add-scc-to-user anyuid -z default          -n memoryhub-db
+  oc adm policy add-scc-to-user anyuid -z memoryhub-minio  -n memory-hub-mcp
+  oc adm policy add-scc-to-user anyuid -z memoryhub-valkey -n memory-hub-mcp
+*/}}
+{{- if .Values.postgresql.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memoryhub-anyuid-db-default
+  namespace: {{ .Values.namespaces.db }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.scc.anyuidClusterRole }}
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: {{ .Values.namespaces.db }}
+{{- end }}
+{{- if .Values.minio.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memoryhub-anyuid-minio
+  namespace: {{ .Values.namespaces.mcp }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.scc.anyuidClusterRole }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.minio.serviceAccount }}
+    namespace: {{ .Values.namespaces.mcp }}
+{{- end }}
+{{- if .Values.valkey.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memoryhub-anyuid-valkey
+  namespace: {{ .Values.namespaces.mcp }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.scc.anyuidClusterRole }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.valkey.serviceAccount }}
+    namespace: {{ .Values.namespaces.mcp }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,117 @@
+{{- if .Values.valkey.enabled }}
+{{- $ns := .Values.namespaces.mcp }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.valkey.serviceAccount }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app.kubernetes.io/name: memoryhub-valkey
+    app.kubernetes.io/component: cache
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memoryhub-valkey-data
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app.kubernetes.io/name: memoryhub-valkey
+    app.kubernetes.io/component: cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.valkey.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memoryhub-valkey
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app.kubernetes.io/name: memoryhub-valkey
+    app.kubernetes.io/component: cache
+spec:
+  type: ClusterIP
+  ports:
+    - port: 6379
+      targetPort: 6379
+      protocol: TCP
+      name: valkey
+  selector:
+    app.kubernetes.io/name: memoryhub-valkey
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memoryhub-valkey
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app.kubernetes.io/name: memoryhub-valkey
+    app.kubernetes.io/component: cache
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memoryhub-valkey
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memoryhub-valkey
+        app.kubernetes.io/part-of: memoryhub
+        app.kubernetes.io/component: cache
+    spec:
+      serviceAccountName: {{ .Values.valkey.serviceAccount }}
+      securityContext:
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+        - name: valkey
+          image: {{ .Values.valkey.image }}
+          args:
+            - "--appendonly"
+            - "yes"
+            - "--dir"
+            - "/data"
+            - "--save"
+            - "60 1000"
+            - "--maxmemory"
+            - {{ .Values.valkey.maxmemory | quote }}
+            - "--maxmemory-policy"
+            - "noeviction"
+          ports:
+            - containerPort: 6379
+              name: valkey
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.valkey.resources | nindent 12 }}
+          volumeMounts:
+            - name: valkey-data
+              mountPath: /data
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: valkey-data
+          persistentVolumeClaim:
+            claimName: memoryhub-valkey-data
+{{- end }}

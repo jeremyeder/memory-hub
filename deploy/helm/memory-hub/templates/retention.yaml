@@ -1,0 +1,83 @@
+{{- if .Values.retention.enabled }}
+{{- $ns := .Values.namespaces.db }}
+{{- $pgSecret := default "memoryhub-pg-credentials" .Values.secrets.pgCredentials.existingSecret }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: memoryhub-test-data-cleanup
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app.kubernetes.io/name: memoryhub-test-data-cleanup
+    app.kubernetes.io/component: maintenance
+spec:
+  schedule: {{ .Values.retention.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: cleanup
+              image: {{ .Values.retention.image }}
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  echo "=== MemoryHub test data cleanup ==="
+                  echo "Target: ${PGHOST}:${PGPORT}/${PGDATABASE}"
+                  TEST_COUNT=$(psql -tA -c "
+                    SELECT count(*) FROM memory_nodes
+                    WHERE deleted_at IS NULL
+                    AND (content ILIKE '[test]%' OR stub ILIKE '[test]%'
+                      OR owner_id IN ('test-user','dup-test-user','similarity-score-test',
+                        'seed-test-user','rollback-test-user','session-reuse-test',
+                        'domain-test-user','near-dup-user','similarity-direct-test',
+                        'seed-idempotency-user','multi-domain-user','e2e-test'))
+                  ")
+                  echo "Test data found: ${TEST_COUNT}"
+                  if [ "${TEST_COUNT}" -eq 0 ]; then echo "Nothing to clean up."; exit 0; fi
+                  DELETED=$(psql -tA -c "
+                    UPDATE memory_nodes SET deleted_at = NOW(), is_current = false
+                    WHERE deleted_at IS NULL
+                    AND (content ILIKE '[test]%' OR stub ILIKE '[test]%'
+                      OR owner_id IN ('test-user','dup-test-user','similarity-score-test',
+                        'seed-test-user','rollback-test-user','session-reuse-test',
+                        'domain-test-user','near-dup-user','similarity-direct-test',
+                        'seed-idempotency-user','multi-domain-user','e2e-test'))
+                  ")
+                  echo "Soft-deleted: ${DELETED} rows"
+              env:
+                - name: PGHOST
+                  value: {{ printf "memoryhub-pg.%s.svc.cluster.local" $ns | quote }}
+                - name: PGPORT
+                  value: "5432"
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $pgSecret }}
+                      key: POSTGRES_USER
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $pgSecret }}
+                      key: POSTGRES_PASSWORD
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $pgSecret }}
+                      key: POSTGRES_DB
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+{{- end }}

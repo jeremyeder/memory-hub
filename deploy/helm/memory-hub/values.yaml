@@ -1,0 +1,325 @@
+# =============================================================================
+# MemoryHub Helm values
+# =============================================================================
+# This chart deploys the full MemoryHub stack across four namespaces. It is a
+# faithful translation of scripts/deploy-full.sh + the kustomize bases +
+# per-component OpenShift manifests into a single values-driven chart.
+#
+# SECURITY: the default secret values below are PLACEHOLDERS. Override every
+# value marked "CHANGE-ME" (or point at an existing Secret via existingSecret)
+# before using this chart for anything real.
+# =============================================================================
+
+global:
+  # Registry that hosts the three MemoryHub-built images. Combined with each
+  # component's image.repository to form the full image reference.
+  imageRegistry: quay.io/jeremyeder
+  imagePullPolicy: Always
+  # Optional OpenShift apps domain, e.g. "apps.cluster-xyz.example.com".
+  # When set, Route hosts and the derived OIDC / public URLs are computed as
+  # "<route-name>-<namespace>.<routeDomain>". Leave empty to let OpenShift
+  # auto-assign Route hosts (recommended for first install).
+  routeDomain: ""
+
+# -----------------------------------------------------------------------------
+# Namespaces. MemoryHub is intentionally multi-namespace. Set create=false if
+# the namespaces already exist or you install the chart with restricted RBAC.
+# -----------------------------------------------------------------------------
+namespaces:
+  create: true
+  db: memoryhub-db
+  mcp: memory-hub-mcp
+  auth: memoryhub-auth
+  ui: memoryhub-ui
+
+# -----------------------------------------------------------------------------
+# OpenShift "anyuid" SCC RoleBindings. The upstream postgres/minio/valkey
+# images run as fixed UIDs, which the default "restricted" SCC forbids.
+# deploy-full.sh runs `oc adm policy add-scc-to-user anyuid`; the declarative
+# equivalent is a RoleBinding to the ClusterRole system:openshift:scc:anyuid.
+# Requires cluster-admin (or self-provisioner) to apply. Set create=false on
+# vanilla Kubernetes.
+# -----------------------------------------------------------------------------
+scc:
+  create: true
+  anyuidClusterRole: system:openshift:scc:anyuid
+
+# =============================================================================
+# Tenancy / auth configuration (CRITICAL — see docs/identity-model)
+# =============================================================================
+auth:
+  enabled: true
+  image:
+    repository: memoryhub-auth
+    tag: latest
+    pullPolicy: ""        # "" => global.imagePullPolicy
+
+  # -------------------------------------------------------------------------
+  # OIDC / JWT trust for the MCP server's FastMCP JWTVerifier.
+  # The MCP server reads these three env vars:
+  #   AUTH_ISSUER   <- oidc.issuerUrl
+  #   AUTH_JWKS_URI <- oidc.jwksUrl
+  #   AUTH_AUDIENCE <- oidc.audience
+  # Point them at:
+  #   (a) an EXTERNAL Keycloak / Red Hat SSO realm, e.g.
+  #         issuerUrl: https://sso.example.com/realms/memoryhub
+  #         jwksUrl:   https://sso.example.com/realms/memoryhub/protocol/openid-connect/certs
+  #   (b) OR the bundled memoryhub-auth service (leave blank and set
+  #       global.routeDomain to auto-derive, or set explicitly).
+  # If issuerUrl AND jwksUrl both resolve empty, the MCP server runs in
+  # session-only (register_session API-key) mode — no JWT verification.
+  # -------------------------------------------------------------------------
+  oidc:
+    issuerUrl: ""
+    jwksUrl: ""
+    audience: memoryhub
+
+  # Auth server's own OpenShift OAuth broker settings (server -> env).
+  server:
+    # AUTH_ISSUER for the auth server itself (its own public route). Auto-derived
+    # from global.routeDomain when empty; otherwise set to https://<auth route>.
+    issuerUrl: ""
+    # AUTH_OPENSHIFT_OAUTH_AUTHORIZE_URL — the cluster's OAuth authorize URL,
+    # e.g. https://oauth-openshift.apps.<domain>/oauth/authorize. Auto-derived
+    # from global.routeDomain when empty.
+    oauthAuthorizeUrl: ""
+    tokenUrl: "https://oauth-openshift.openshift-authentication.svc/oauth/token"
+    userInfoUrl: "https://kubernetes.default.svc/apis/user.openshift.io/v1/users/~"
+    tlsVerify: "true"
+    caBundle: "/etc/pki/combined-ca/ca-bundle.crt"
+    # Restrict to an OpenShift group; empty string allows all authenticated users.
+    allowedGroup: "memoryhub-users"
+    oauthClientId: "memoryhub-auth-broker"
+
+  # Cluster-scoped OAuthClient CR (registers memoryhub-auth with OpenShift OAuth).
+  # Requires cluster-admin. Off by default; apply memoryhub-auth/deploy/oauthclient.yaml
+  # separately if you cannot grant this at install time.
+  oauthClient:
+    create: false
+    accessTokenMaxAgeSeconds: 600
+    # redirectUri: auto-derived from the auth route when routeDomain is set.
+    redirectUri: ""
+
+  route:
+    enabled: true
+    host: ""            # explicit host overrides routeDomain derivation
+  replicas: 1
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 250m
+
+# -----------------------------------------------------------------------------
+# Multi-tenant isolation flags (MCP server env). User-scope isolation is always
+# on in code; project/role isolation default ON and are exposed here.
+#   MEMORYHUB_PROJECT_ISOLATION_ENABLED <- isolation.projectEnabled
+#   MEMORYHUB_ROLE_ISOLATION_ENABLED    <- isolation.roleEnabled
+# -----------------------------------------------------------------------------
+isolation:
+  projectEnabled: true
+  roleEnabled: true
+
+# =============================================================================
+# MCP server
+# =============================================================================
+mcp:
+  enabled: true
+  image:
+    repository: memoryhub-mcp
+    tag: latest
+    pullPolicy: ""
+  replicas: 1
+  service:
+    port: 8080
+  route:
+    enabled: true
+    host: ""
+    path: /mcp/
+  http:
+    path: /mcp/
+    logLevel: INFO
+  s3:
+    bucket: memoryhub
+    secure: "false"
+    endpoint: "memoryhub-minio:9000"
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  # Per-user API-key fallback (mounted as /config/users.json). This is the
+  # register_session bearer-token path used when JWT is not configured, and a
+  # supported fallback alongside JWT. Set create=false to manage the ConfigMap
+  # out of band. REPLACE every placeholder api_key before real use.
+  users:
+    create: true
+    configMapName: memoryhub-users
+    entries:
+      - user_id: wjackson
+        name: Wes Jackson
+        api_key: "REPLACE-ME-GENERATE-WITH-openssl-rand-hex-16"
+        scopes: ["user", "project", "role", "organizational", "enterprise"]
+        project_memberships: []
+      - user_id: dev-test
+        name: Test User
+        api_key: "REPLACE-ME-GENERATE-A-SECOND-KEY"
+        scopes: ["user", "project"]
+        project_memberships: []
+
+# =============================================================================
+# UI (dashboard) + oauth-proxy sidecar
+# =============================================================================
+ui:
+  enabled: true
+  image:
+    repository: memoryhub-ui
+    tag: latest
+    pullPolicy: ""
+  replicas: 1
+  route:
+    enabled: true
+    host: ""
+  # Public-facing URLs used by the welcome-email renderer. Auto-derived from
+  # global.routeDomain when empty; otherwise placeholders.
+  publicMcpUrl: ""
+  publicAuthUrl: ""
+  oauthProxy:
+    image: registry.redhat.io/openshift4/ose-oauth-proxy:v4.14
+    pullPolicy: IfNotPresent
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 100m
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+# =============================================================================
+# Third-party dependencies (reference upstream images; not built by this repo)
+# =============================================================================
+postgresql:
+  enabled: true
+  image: pgvector/pgvector:0.8.2-pg16
+  storage: 10Gi
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 1Gi
+      cpu: "1"
+
+minio:
+  enabled: true
+  image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+  storage: 10Gi
+  serviceAccount: memoryhub-minio
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 1Gi
+      cpu: "1"
+
+valkey:
+  enabled: true
+  image: docker.io/valkey/valkey:8.0-alpine
+  storage: 5Gi
+  serviceAccount: memoryhub-valkey
+  maxmemory: 512mb
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 768Mi
+      cpu: "1"
+
+# =============================================================================
+# Retention CronJob (soft-deletes test data weekly)
+# =============================================================================
+retention:
+  enabled: true
+  image: registry.redhat.io/rhel9/postgresql-16:latest
+  schedule: "0 3 * * 0"
+
+# =============================================================================
+# Secrets. For each: set existingSecret to reuse a pre-created Secret, OR leave
+# it empty to have the chart create the Secret from the values below.
+# DEFAULTS ARE PLACEHOLDERS — override before real use.
+# =============================================================================
+secrets:
+  # memoryhub-pg-credentials (created in the db AND auth namespaces)
+  pgCredentials:
+    existingSecret: ""
+    postgresUser: memoryhub
+    postgresPassword: "CHANGE-ME-postgres-password"
+    postgresDb: memoryhub
+
+  # memoryhub-db-credentials — MEMORYHUB_-prefixed DB env (mcp + ui namespaces)
+  dbCredentials:
+    existingSecret: ""
+    # host/port/name/user default from pgCredentials + postgresql service.
+    embeddingUrl: ""
+    rerankerUrl: ""
+
+  # memoryhub-minio-credentials (mcp namespace)
+  minioCredentials:
+    existingSecret: ""
+    rootUser: memoryhub
+    rootPassword: "CHANGE-ME-minio-password"
+
+  # auth-admin-key (auth namespace)
+  authAdminKey:
+    existingSecret: ""
+    adminKey: "CHANGE-ME-auth-admin-key"
+
+  # auth-rsa-keys (RSA-2048 keypair for JWT signing, auth namespace).
+  # MUST be replaced with a real keypair. Generate:
+  #   openssl genrsa 2048 > private.pem
+  #   openssl rsa -in private.pem -pubout > public.pem
+  authRsaKeys:
+    existingSecret: ""
+    privateKeyPem: "CHANGE-ME-RSA-PRIVATE-KEY-PEM"
+    publicKeyPem: "CHANGE-ME-RSA-PUBLIC-KEY-PEM"
+
+  # openshift-oauth-client-secret (auth namespace)
+  openshiftOauthClientSecret:
+    existingSecret: ""
+    clientSecret: "CHANGE-ME-oauth-client-secret"
+
+  # memoryhub-ui-proxy (oauth-proxy session secret, ui namespace).
+  # Must be exactly 32 bytes under key "session-secret".
+  uiProxy:
+    existingSecret: ""
+    sessionSecret: "CHANGE-ME-32-byte-session-secret!"
+
+  # memoryhub-ui-admin-key (ui namespace) — mirrors auth-admin-key for the BFF.
+  uiAdminKey:
+    existingSecret: ""
+    # defaults to secrets.authAdminKey.adminKey when empty
+    adminKey: ""
+
+# =============================================================================
+# RHOAI OdhApplication tile (optional, default off)
+# =============================================================================
+odhApplication:
+  enabled: false
+  namespace: redhat-ods-applications
+  displayName: MemoryHub
+  category: "Red Hat managed"
+  provider: "Community"
+  support: "community"

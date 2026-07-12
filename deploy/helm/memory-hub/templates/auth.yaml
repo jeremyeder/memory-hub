@@ -1,0 +1,189 @@
+{{- if .Values.auth.enabled }}
+{{- $ns := .Values.namespaces.auth }}
+{{- $pgSecret := default "memoryhub-pg-credentials" .Values.secrets.pgCredentials.existingSecret }}
+{{- $rsaSecret := default "auth-rsa-keys" .Values.secrets.authRsaKeys.existingSecret }}
+{{- $adminSecret := default "auth-admin-key" .Values.secrets.authAdminKey.existingSecret }}
+{{- $oauthSecret := default "openshift-oauth-client-secret" .Values.secrets.openshiftOauthClientSecret.existingSecret }}
+{{- $dbHost := printf "memoryhub-pg.%s.svc.cluster.local" .Values.namespaces.db }}
+{{- $routeHost := include "memory-hub.routeHost" (dict "root" . "name" "auth-server" "ns" $ns "explicit" .Values.auth.route.host) }}
+{{- $issuer := .Values.auth.server.issuerUrl }}
+{{- if not $issuer }}{{ $issuer = include "memory-hub.authServerUrl" (dict "root" .) }}{{- end }}
+{{- $authorize := .Values.auth.server.oauthAuthorizeUrl }}
+{{- if and (not $authorize) .Values.global.routeDomain }}{{ $authorize = printf "https://oauth-openshift.%s/oauth/authorize" .Values.global.routeDomain }}{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: service-ca-bundle
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+  annotations:
+    service.beta.openshift.io/inject-cabundle: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-server
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app: auth-server
+spec:
+  replicas: {{ .Values.auth.replicas }}
+  selector:
+    matchLabels:
+      app: auth-server
+  template:
+    metadata:
+      labels:
+        app: auth-server
+    spec:
+      initContainers:
+        - name: combine-ca
+          image: registry.access.redhat.com/ubi9/ubi-minimal:latest
+          command: ['sh', '-c']
+          args:
+            - |
+              cat /var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+                  /etc/pki/service-ca/service-ca.crt \
+                  > /etc/pki/combined-ca/ca-bundle.crt
+          volumeMounts:
+            - name: service-ca
+              mountPath: /etc/pki/service-ca
+              readOnly: true
+            - name: combined-ca
+              mountPath: /etc/pki/combined-ca
+      containers:
+        - name: auth-server
+          image: {{ include "memory-hub.image" (dict "root" . "img" .Values.auth.image) }}
+          imagePullPolicy: {{ include "memory-hub.pullPolicy" (dict "root" . "img" .Values.auth.image) }}
+          ports:
+            - containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: combined-ca
+              mountPath: /etc/pki/combined-ca
+              readOnly: true
+          envFrom:
+            - secretRef:
+                name: {{ $pgSecret }}
+            - secretRef:
+                name: {{ $rsaSecret }}
+            - secretRef:
+                name: {{ $adminSecret }}
+          env:
+            - name: AUTH_HOST
+              value: "0.0.0.0"
+            - name: AUTH_PORT
+              value: "8081"
+            - name: AUTH_DB_HOST
+              value: {{ $dbHost | quote }}
+            - name: AUTH_DB_PORT
+              value: "5432"
+            - name: AUTH_DB_NAME
+              value: {{ .Values.secrets.pgCredentials.postgresDb | quote }}
+            - name: AUTH_DB_USER
+              value: {{ .Values.secrets.pgCredentials.postgresUser | quote }}
+            - name: AUTH_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $pgSecret }}
+                  key: POSTGRES_PASSWORD
+            - name: AUTH_ISSUER
+              value: {{ $issuer | quote }}
+            - name: AUTH_OPENSHIFT_OAUTH_AUTHORIZE_URL
+              value: {{ $authorize | quote }}
+            - name: AUTH_OPENSHIFT_OAUTH_TOKEN_URL
+              value: {{ .Values.auth.server.tokenUrl | quote }}
+            - name: AUTH_OPENSHIFT_USER_INFO_URL
+              value: {{ .Values.auth.server.userInfoUrl | quote }}
+            - name: AUTH_OPENSHIFT_TLS_VERIFY
+              value: {{ .Values.auth.server.tlsVerify | quote }}
+            - name: AUTH_OPENSHIFT_CA_BUNDLE
+              value: {{ .Values.auth.server.caBundle | quote }}
+            - name: AUTH_OPENSHIFT_ALLOWED_GROUP
+              value: {{ .Values.auth.server.allowedGroup | quote }}
+            - name: AUTH_OPENSHIFT_OAUTH_CLIENT_ID
+              value: {{ .Values.auth.server.oauthClientId | quote }}
+            - name: AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $oauthSecret }}
+                  key: AUTH_OPENSHIFT_OAUTH_CLIENT_SECRET
+          resources:
+            {{- toYaml .Values.auth.resources | nindent 12 }}
+      volumes:
+        - name: service-ca
+          configMap:
+            name: service-ca-bundle
+        - name: combined-ca
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-server
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app: auth-server
+spec:
+  selector:
+    app: auth-server
+  ports:
+    - port: 8081
+      targetPort: 8081
+      protocol: TCP
+{{- if .Values.auth.route.enabled }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: auth-server
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app: auth-server
+spec:
+  {{- if $routeHost }}
+  host: {{ $routeHost }}
+  {{- end }}
+  to:
+    kind: Service
+    name: auth-server
+  port:
+    targetPort: 8081
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}
+{{- if .Values.auth.oauthClient.create }}
+---
+apiVersion: oauth.openshift.io/v1
+kind: OAuthClient
+metadata:
+  name: {{ .Values.auth.server.oauthClientId }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+secret: {{ .Values.secrets.openshiftOauthClientSecret.clientSecret | quote }}
+redirectURIs:
+  {{- $redirect := .Values.auth.oauthClient.redirectUri }}
+  {{- if and (not $redirect) $routeHost }}{{ $redirect = printf "https://%s/oauth/openshift/callback" $routeHost }}{{- end }}
+  - {{ $redirect | quote }}
+grantMethod: prompt
+accessTokenMaxAgeSeconds: {{ .Values.auth.oauthClient.accessTokenMaxAgeSeconds }}
+{{- end }}
+{{- end }}

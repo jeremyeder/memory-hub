@@ -1,0 +1,164 @@
+{{- if .Values.ui.enabled }}
+{{- $ns := .Values.namespaces.ui }}
+{{- $dbSecret := default "memoryhub-db-credentials" .Values.secrets.dbCredentials.existingSecret }}
+{{- $proxySecret := default "memoryhub-ui-proxy" .Values.secrets.uiProxy.existingSecret }}
+{{- $adminSecret := default "memoryhub-ui-admin-key" .Values.secrets.uiAdminKey.existingSecret }}
+{{- $routeHost := include "memory-hub.routeHost" (dict "root" . "name" "memoryhub-ui" "ns" $ns "explicit" .Values.ui.route.host) }}
+{{- $mcpHost := include "memory-hub.routeHost" (dict "root" . "name" "memory-hub-mcp" "ns" .Values.namespaces.mcp "explicit" .Values.mcp.route.host) }}
+{{- $authHost := include "memory-hub.routeHost" (dict "root" . "name" "auth-server" "ns" .Values.namespaces.auth "explicit" .Values.auth.route.host) }}
+{{- $publicMcp := .Values.ui.publicMcpUrl }}
+{{- if and (not $publicMcp) $mcpHost }}{{ $publicMcp = printf "https://%s/mcp/" $mcpHost }}{{- end }}
+{{- if not $publicMcp }}{{ $publicMcp = "https://mcp-server.example.com/mcp/" }}{{- end }}
+{{- $publicAuth := .Values.ui.publicAuthUrl }}
+{{- if and (not $publicAuth) $authHost }}{{ $publicAuth = printf "https://%s" $authHost }}{{- end }}
+{{- if not $publicAuth }}{{ $publicAuth = "https://auth-server.example.com" }}{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: memoryhub-ui
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirectreference.primary: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"memoryhub-ui"}}'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memoryhub-ui
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app: memoryhub-ui
+spec:
+  replicas: {{ .Values.ui.replicas }}
+  selector:
+    matchLabels:
+      app: memoryhub-ui
+  template:
+    metadata:
+      labels:
+        app: memoryhub-ui
+    spec:
+      serviceAccountName: memoryhub-ui
+      containers:
+        - name: memoryhub-ui
+          image: {{ include "memory-hub.image" (dict "root" . "img" .Values.ui.image) }}
+          imagePullPolicy: {{ include "memory-hub.pullPolicy" (dict "root" . "img" .Values.ui.image) }}
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          envFrom:
+            - secretRef:
+                name: {{ $dbSecret }}
+          env:
+            - name: MEMORYHUB_MCP_SERVER_URL
+              value: {{ printf "http://memory-hub-mcp.%s.svc:8080/mcp/" .Values.namespaces.mcp | quote }}
+            - name: MEMORYHUB_AUTH_SERVICE_URL
+              value: {{ printf "http://auth-server.%s.svc:8081" .Values.namespaces.auth | quote }}
+            - name: MEMORYHUB_PUBLIC_MCP_URL
+              value: {{ $publicMcp | quote }}
+            - name: MEMORYHUB_PUBLIC_AUTH_URL
+              value: {{ $publicAuth | quote }}
+            - name: MEMORYHUB_ADMIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $adminSecret }}
+                  key: MEMORYHUB_ADMIN_KEY
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+        - name: oauth-proxy
+          image: {{ .Values.ui.oauthProxy.image }}
+          imagePullPolicy: {{ .Values.ui.oauthProxy.pullPolicy }}
+          ports:
+            - containerPort: 8443
+              name: proxy
+              protocol: TCP
+          args:
+            - --http-address=127.0.0.1:4180
+            - --https-address=:8443
+            - --provider=openshift
+            - --openshift-service-account=memoryhub-ui
+            - --upstream=http://localhost:8080
+            - --tls-cert=/etc/tls/private/tls.crt
+            - --tls-key=/etc/tls/private/tls.key
+            - --cookie-secret-file=/etc/proxy/secrets/session-secret
+            - --pass-basic-auth=false
+            - --pass-access-token=true
+            - --skip-auth-regex=^/healthz$
+          volumeMounts:
+            - name: proxy-tls
+              mountPath: /etc/tls/private
+              readOnly: true
+            - name: proxy-secret
+              mountPath: /etc/proxy/secrets
+              readOnly: true
+          resources:
+            {{- toYaml .Values.ui.oauthProxy.resources | nindent 12 }}
+      volumes:
+        - name: proxy-tls
+          secret:
+            secretName: memoryhub-ui-tls
+        - name: proxy-secret
+          secret:
+            secretName: {{ $proxySecret }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memoryhub-ui
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app: memoryhub-ui
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: memoryhub-ui-tls
+spec:
+  selector:
+    app: memoryhub-ui
+  ports:
+    - name: proxy
+      port: 8443
+      targetPort: 8443
+      protocol: TCP
+    - name: app
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+{{- if .Values.ui.route.enabled }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: memoryhub-ui
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app: memoryhub-ui
+spec:
+  {{- if $routeHost }}
+  host: {{ $routeHost }}
+  {{- end }}
+  to:
+    kind: Service
+    name: memoryhub-ui
+  port:
+    targetPort: 8443
+  tls:
+    termination: reencrypt
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}
+{{- end }}

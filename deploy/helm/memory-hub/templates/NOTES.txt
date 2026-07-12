@@ -1,0 +1,45 @@
+MemoryHub {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}".
+
+Namespaces:
+  database : {{ .Values.namespaces.db }}
+  mcp      : {{ .Values.namespaces.mcp }}
+  auth     : {{ .Values.namespaces.auth }}
+  ui       : {{ .Values.namespaces.ui }}
+
+Images (global.imageRegistry = {{ .Values.global.imageRegistry }}):
+{{- if .Values.mcp.enabled }}
+  mcp  : {{ include "memory-hub.image" (dict "root" . "img" .Values.mcp.image) }}
+{{- end }}
+{{- if .Values.auth.enabled }}
+  auth : {{ include "memory-hub.image" (dict "root" . "img" .Values.auth.image) }}
+{{- end }}
+{{- if .Values.ui.enabled }}
+  ui   : {{ include "memory-hub.image" (dict "root" . "img" .Values.ui.image) }}
+{{- end }}
+
+Tenancy / auth:
+{{- $issuer := include "memory-hub.mcpIssuer" . }}
+{{- if $issuer }}
+  MCP JWTVerifier trusts issuer : {{ $issuer }}
+  MCP JWKS URI                  : {{ include "memory-hub.mcpJwks" . }}
+  MCP audience (AUTH_AUDIENCE)  : {{ .Values.auth.oidc.audience }}
+{{- else }}
+  MCP JWT verification is DISABLED (session-only / register_session API keys).
+  Set auth.oidc.issuerUrl + auth.oidc.jwksUrl (external Keycloak / Red Hat SSO
+  realm) or global.routeDomain to trust the bundled auth server.
+{{- end }}
+  Project isolation : {{ .Values.isolation.projectEnabled }}
+  Role isolation    : {{ .Values.isolation.roleEnabled }}
+
+{{- if or (not .Values.secrets.pgCredentials.existingSecret) (not .Values.secrets.authRsaKeys.existingSecret) }}
+
+WARNING: This release created Secrets from chart values containing PLACEHOLDER
+values (look for "CHANGE-ME" / "REPLACE-ME"). Override them before production
+use, especially secrets.authRsaKeys (must be a real RSA-2048 keypair) and every
+mcp.users.entries[].api_key.
+{{- end }}
+
+OpenShift Routes are created for MCP (path /mcp/), auth-server, and the UI.
+Query them with:
+  oc get route -n {{ .Values.namespaces.mcp }} memory-hub-mcp
+  oc get route -n {{ .Values.namespaces.ui }} memoryhub-ui

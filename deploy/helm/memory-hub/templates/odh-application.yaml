@@ -1,0 +1,40 @@
+{{- if .Values.odhApplication.enabled }}
+{{- $uiHost := include "memory-hub.routeHost" (dict "root" . "name" "memoryhub-ui" "ns" .Values.namespaces.ui "explicit" .Values.ui.route.host) }}
+---
+apiVersion: dashboard.opendatahub.io/v1
+kind: OdhApplication
+metadata:
+  name: memoryhub
+  namespace: {{ .Values.odhApplication.namespace }}
+  labels:
+    app.opendatahub.io/rhods-dashboard: "true"
+    {{- include "memory-hub.labels" . | nindent 4 }}
+  annotations:
+    opendatahub.io/categories: "Model development"
+spec:
+  displayName: {{ .Values.odhApplication.displayName | quote }}
+  description: >-
+    Centralized agent memory with governance and curation
+    for OpenShift AI workloads.
+  category: {{ .Values.odhApplication.category | quote }}
+  provider: {{ .Values.odhApplication.provider | quote }}
+  support: {{ .Values.odhApplication.support | quote }}
+  route: memoryhub-ui
+  docsLink: ""
+  getStartedLink: ""
+  getStartedMarkDown: |
+    # MemoryHub
+
+    Centralized, governed memory for AI agents running on OpenShift AI.
+
+    Click **Open application** to access the MemoryHub dashboard.
+    {{- if $uiHost }}
+    Dashboard: https://{{ $uiHost }}/
+    {{- end }}
+  img: |
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36">
+      <rect width="36" height="36" rx="4" fill="#ee0000"/>
+      <circle cx="18" cy="18" r="10" stroke="#fff" stroke-width="1.5" fill="none"/>
+      <circle cx="18" cy="18" r="3.5" fill="#fff"/>
+    </svg>
+{{- end }}

@@ -1,0 +1,169 @@
+{{- if .Values.mcp.enabled }}
+{{- $ns := .Values.namespaces.mcp }}
+{{- $dbSecret := default "memoryhub-db-credentials" .Values.secrets.dbCredentials.existingSecret }}
+{{- $minioSecret := default "memoryhub-minio-credentials" .Values.secrets.minioCredentials.existingSecret }}
+{{- $issuer := include "memory-hub.mcpIssuer" . }}
+{{- $jwks := include "memory-hub.mcpJwks" . }}
+{{- $routeHost := include "memory-hub.routeHost" (dict "root" . "name" "memory-hub-mcp" "ns" $ns "explicit" .Values.mcp.route.host) }}
+{{- if .Values.mcp.users.create }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.mcp.users.configMapName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app.kubernetes.io/name: memory-hub-mcp
+data:
+  users.json: |
+    {{- dict "users" .Values.mcp.users.entries | toPrettyJson | nindent 4 }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-hub-mcp
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app.kubernetes.io/name: memory-hub-mcp
+spec:
+  replicas: {{ .Values.mcp.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: memory-hub-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: memory-hub-mcp
+        app.kubernetes.io/part-of: memoryhub
+    spec:
+      containers:
+        - name: mcp-server
+          image: {{ include "memory-hub.image" (dict "root" . "img" .Values.mcp.image) }}
+          imagePullPolicy: {{ include "memory-hub.pullPolicy" (dict "root" . "img" .Values.mcp.image) }}
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          envFrom:
+            - secretRef:
+                name: {{ $dbSecret }}
+          env:
+            - name: MCP_TRANSPORT
+              value: "http"
+            - name: MCP_HTTP_HOST
+              value: "0.0.0.0"
+            - name: MCP_HTTP_PORT
+              value: "8080"
+            - name: MCP_HTTP_PATH
+              value: {{ .Values.mcp.http.path | quote }}
+            - name: MCP_LOG_LEVEL
+              value: {{ .Values.mcp.http.logLevel | quote }}
+            {{- if .Values.mcp.users.create }}
+            - name: MEMORYHUB_USERS_FILE
+              value: /config/users.json
+            {{- end }}
+            # ---- JWT verification (FastMCP JWTVerifier) ----
+            {{- if $issuer }}
+            - name: AUTH_ISSUER
+              value: {{ $issuer | quote }}
+            {{- end }}
+            {{- if $jwks }}
+            - name: AUTH_JWKS_URI
+              value: {{ $jwks | quote }}
+            {{- end }}
+            - name: AUTH_AUDIENCE
+              value: {{ .Values.auth.oidc.audience | quote }}
+            # ---- Multi-tenant isolation ----
+            - name: MEMORYHUB_PROJECT_ISOLATION_ENABLED
+              value: {{ .Values.isolation.projectEnabled | quote }}
+            - name: MEMORYHUB_ROLE_ISOLATION_ENABLED
+              value: {{ .Values.isolation.roleEnabled | quote }}
+            {{- if .Values.valkey.enabled }}
+            - name: MEMORYHUB_VALKEY_URL
+              value: {{ printf "redis://memoryhub-valkey.%s.svc.cluster.local:6379/0" $ns | quote }}
+            {{- end }}
+            {{- if .Values.minio.enabled }}
+            - name: MEMORYHUB_S3_ENDPOINT
+              value: {{ .Values.mcp.s3.endpoint | quote }}
+            - name: MEMORYHUB_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $minioSecret }}
+                  key: MINIO_ROOT_USER
+            - name: MEMORYHUB_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $minioSecret }}
+                  key: MINIO_ROOT_PASSWORD
+            - name: MEMORYHUB_S3_BUCKET
+              value: {{ .Values.mcp.s3.bucket | quote }}
+            - name: MEMORYHUB_S3_SECURE
+              value: {{ .Values.mcp.s3.secure | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.mcp.resources | nindent 12 }}
+          {{- if .Values.mcp.users.create }}
+          volumeMounts:
+            - name: users-config
+              mountPath: /config
+              readOnly: true
+          {{- end }}
+      {{- if .Values.mcp.users.create }}
+      volumes:
+        - name: users-config
+          configMap:
+            name: {{ .Values.mcp.users.configMapName }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memory-hub-mcp
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app.kubernetes.io/name: memory-hub-mcp
+spec:
+  selector:
+    app.kubernetes.io/name: memory-hub-mcp
+  ports:
+    - port: {{ .Values.mcp.service.port }}
+      targetPort: 8080
+      protocol: TCP
+{{- if .Values.mcp.route.enabled }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: memory-hub-mcp
+  namespace: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" . | nindent 4 }}
+    app.kubernetes.io/name: memory-hub-mcp
+spec:
+  {{- if $routeHost }}
+  host: {{ $routeHost }}
+  {{- end }}
+  path: {{ .Values.mcp.route.path }}
+  to:
+    kind: Service
+    name: memory-hub-mcp
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- end }}
+{{- end }}

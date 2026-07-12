@@ -1,0 +1,22 @@
+apiVersion: v2
+name: memory-hub
+description: |
+  MemoryHub - centralized, governed memory for AI agents on OpenShift / Kubernetes.
+  Deploys the full stack: PostgreSQL+pgvector, MinIO, Valkey, the MCP server,
+  the OAuth 2.1 auth server, the dashboard UI (behind oauth-proxy), and a
+  retention CronJob. Multi-tenant isolation (user/project/role) is on by default
+  and the MCP server can trust an external Keycloak / Red Hat SSO realm.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - memory
+  - agents
+  - mcp
+  - rhoai
+  - openshift
+home: https://github.com/redhat-ai-americas/memory-hub
+sources:
+  - https://github.com/redhat-ai-americas/memory-hub
+maintainers:
+  - name: MemoryHub contributors

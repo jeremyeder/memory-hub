@@ -1,0 +1,12 @@
+{{- if .Values.namespaces.create }}
+{{- $nss := list .Values.namespaces.db .Values.namespaces.mcp .Values.namespaces.auth .Values.namespaces.ui | uniq }}
+{{- range $ns := $nss }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    {{- include "memory-hub.labels" $ | nindent 4 }}
+{{- end }}
+{{- end }}
