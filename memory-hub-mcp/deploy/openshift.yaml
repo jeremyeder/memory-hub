@@ -90,7 +90,7 @@ spec:
         # API key validation fallback — the MCP server calls the auth
         # service to validate keys not found in the local ConfigMap.
         - name: AUTH_API_KEY_VALIDATE_URL
-          value: "http://auth-server.memoryhub-auth.svc:8080/internal/validate-api-key"
+          value: "http://auth-server.memoryhub-auth.svc:8081/internal/validate-api-key"
         - name: AUTH_INTERNAL_SERVICE_KEY
           valueFrom:
             secretKeyRef:

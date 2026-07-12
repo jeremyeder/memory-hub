@@ -40,8 +40,8 @@ if ! lsof -i:25432 >/dev/null 2>&1; then
 fi
 
 MEMORYHUB_URL="https://memory-hub-mcp-memory-hub-mcp.apps.cluster-n7pd5.n7pd5.sandbox5167.opentlc.com/mcp/" \
-MEMORYHUB_API_KEY=$(cat ~/.config/memoryhub/api-key) \
-MEMORYHUB_DB_PASS=$(oc get secret memoryhub-pg-credentials --context mcp-rhoai -n memoryhub-db -o jsonpath='{.data.password}' | base64 -d) \
+MEMORYHUB_API_KEY="${MEMORYHUB_API_KEY:?Set MEMORYHUB_API_KEY to the amb-benchmark tenant key}" \
+MEMORYHUB_DB_PASS="${MEMORYHUB_DB_PASS:-$(oc get secret memoryhub-pg-credentials --context mcp-rhoai -n memoryhub-db -o jsonpath='{.data.password}' | base64 -d)}" \
 GOOGLE_API_KEY=$GEMINI_KEY \
 OMB_ANSWER_LLM=gemini \
 OMB_JUDGE_LLM=gemini \
