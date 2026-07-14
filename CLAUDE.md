@@ -85,6 +85,10 @@ Shipped architecture and subsystem designs live in docs/. In-flight designs for 
 Use conventional commit format: `subsystem: Description in imperative mood`
 Example: `memory-tree: Add versioning with isCurrent flag`
 
+## Credential Hygiene
+
+Credentials, API keys, and tokens must never appear in session summaries, plans, issues, or any committed documentation. Reference the secret's storage location instead (e.g., "stored in memoryhub-auth cluster secret" or "see ~/.config/memoryhub/api-key"). This applies to all key formats including hex-format keys (`mh-dev-<hex>`), OAuth client secrets, and database passwords. Incident: a hex-format API key committed in a session summary (2026-07-14) required rotation and git history scrubbing.
+
 ## Deployment Reproducibility (IaC)
 
 Every change must be deployable from code without manual steps. When implementing a feature, verify that all of the following are captured in version-controlled code:
