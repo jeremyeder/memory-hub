@@ -148,16 +148,33 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# EvalHub database Secret (PostgreSQL on shared memoryhub-pg)
+# ---------------------------------------------------------------------------
+banner "EvalHub database"
+
+if oc get secret evalhub-db-credentials --context "$CONTEXT" -n "$NS" &>/dev/null; then
+    info "Secret evalhub-db-credentials already exists"
+else
+    info "Creating evalhub database and secret..."
+    MEMORYHUB_DB_PASSWORD=$(oc get secret memoryhub-pg-credentials --context "$CONTEXT" -n memoryhub-db \
+        -o jsonpath='{.data.POSTGRES_PASSWORD}' 2>/dev/null | base64 -d || true)
+    if [ -z "$MEMORYHUB_DB_PASSWORD" ]; then
+        die "Cannot read memoryhub-pg-credentials from memoryhub-db namespace"
+    fi
+    DB_URL="postgresql://memoryhub:${MEMORYHUB_DB_PASSWORD}@memoryhub-pg.memoryhub-db.svc.cluster.local:5432/evalhub"
+    oc create secret generic evalhub-db-credentials \
+        --from-literal=db-url="$DB_URL" \
+        --context "$CONTEXT" -n "$NS"
+    info "Secret evalhub-db-credentials created"
+fi
+
+# ---------------------------------------------------------------------------
 # EvalHub CR
 # ---------------------------------------------------------------------------
 banner "EvalHub"
 
-if oc get evalhub memoryhub-evalhub --context "$CONTEXT" -n "$NS" &>/dev/null; then
-    info "EvalHub CR memoryhub-evalhub already exists"
-else
-    info "Creating EvalHub CR..."
-    oc apply --context "$CONTEXT" -f "$MANIFEST_DIR/evalhub.yaml"
-fi
+info "Applying EvalHub CR..."
+oc apply --context "$CONTEXT" -f "$MANIFEST_DIR/evalhub.yaml"
 
 # ---------------------------------------------------------------------------
 # MLflow
@@ -226,7 +243,6 @@ else
     [ -n "$TOKEN" ] && evalhub config set token "$TOKEN" 2>/dev/null || true
     evalhub config set tenant "$NS" 2>/dev/null || true
 
-    # SQLite file-backed DB loses providers on pod restart; always re-register
     # Generate provider spec with MemoryHub connection env vars
     MEMORYHUB_MCP_URL="http://memory-hub-mcp.memory-hub-mcp.svc:8080/mcp/"
     MEMORYHUB_KEY=$(bash -c 'cat ~/.config/memoryhub/api-key 2>/dev/null' | tr -d '[:space:]')
