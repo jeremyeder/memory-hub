@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bge-reranker-v2-m3
+  namespace: reranker-model
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bge-reranker-v2-m3
+  template:
+    metadata:
+      labels:
+        app: bge-reranker-v2-m3
+    spec:
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: tei
+          image: ghcr.io/huggingface/text-embeddings-inference:1.6
+          args:
+            - --model-id
+            - BAAI/bge-reranker-v2-m3
+            - --port
+            - "8080"
+          env:
+            - name: HF_HUB_CACHE
+              value: /data/models
+            - name: TRANSFORMERS_CACHE
+              value: /data/models
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "4"
+              memory: 8Gi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: cache
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 180
+            periodSeconds: 10
+            failureThreshold: 10
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: reranker-model-cache
