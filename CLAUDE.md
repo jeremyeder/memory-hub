@@ -124,6 +124,12 @@ When deploying, always use `deploy-full.sh` directly (it preserves the existing 
 
 After restoring from backup, verify `alembic_version` matches the actual schema before running `upgrade head`. Backup dumps can have stale version markers that cause migrations to fail on duplicate columns.
 
+## Verify Before Propagating
+
+Capability claims about our own codebase, deployed infrastructure, or third-party software get verified against code, docs, or live state before they propagate into issues, plans, or reviews. A 10-minute doc read beats a feature request, and a grep beats a rebuild.
+
+Before writing an issue that assumes "X doesn't exist" or "Y can't do Z," check. Before scoping work around a capability you haven't confirmed, confirm it. Three citations from the dreaming arc retro (2026-07-13): the chunking investigation assumed chunking wasn't active (it was), the PVC fix assumed the operator wouldn't reconcile it away (it did), and the sidecar triage assumed forwarding worked out of the box (it didn't).
+
 ## Testing
 - pytest for all Python testing
 - 80%+ coverage target
