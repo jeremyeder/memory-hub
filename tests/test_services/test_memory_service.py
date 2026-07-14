@@ -19,6 +19,7 @@ from memoryhub_core.models.schemas import (
 from memoryhub_core.services.exceptions import ContradictionNotFoundError, MemoryNotCurrentError, MemoryNotFoundError
 from memoryhub_core.services.memory import (
     DEFAULT_PIVOT_THRESHOLD,
+    node_to_read,
     report_contradiction,
     resolve_contradiction,
 )
@@ -1436,15 +1437,15 @@ class MockS3Adapter:
 
 
 def _make_oversized_content() -> str:
-    """Return content exceeding the configured S3 threshold (default 1024 bytes).
+    """Return content exceeding the configured S3 threshold (102400 bytes).
 
     Uses distinct paragraphs separated by double-newlines so that the
     semantic chunker produces multiple chunks (it splits on paragraph
     boundaries first).
     """
     paragraphs = [
-        f"Paragraph {i}: " + "x" * 400
-        for i in range(15)
+        f"Paragraph {i}: " + "x" * 2000
+        for i in range(60)
     ]
     return "\n\n".join(paragraphs)
 
@@ -1453,7 +1454,7 @@ def _make_oversized_content() -> str:
 
 
 async def test_create_memory_inline_when_under_threshold(async_session, embedding_service):
-    """Content under 4096 bytes stays inline even with an S3 adapter present."""
+    """Content under s3_threshold_bytes stays inline even with an S3 adapter present."""
     s3 = MockS3Adapter()
     data = _make_create_data(content="Short content that fits inline")
     result, curation = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
@@ -1465,10 +1466,10 @@ async def test_create_memory_inline_when_under_threshold(async_session, embeddin
 
 
 async def test_create_memory_s3_when_over_threshold(async_session, embedding_service):
-    """Content over 4096 bytes is uploaded to S3 when an adapter is provided."""
+    """Content over s3_threshold_bytes is uploaded to S3 when an adapter is provided."""
     s3 = MockS3Adapter()
     big_content = _make_oversized_content()
-    assert len(big_content.encode("utf-8")) > 4096
+    assert len(big_content.encode("utf-8")) > 102400
 
     data = _make_create_data(content=big_content)
     result, curation = await create_memory(data, async_session, embedding_service, s3_adapter=s3)
@@ -1625,9 +1626,9 @@ async def test_update_memory_s3_content_changed_rechunks(async_session, embeddin
     old_chunks = (await async_session.execute(old_chunks_stmt)).scalars().all()
     assert len(old_chunks) >= 2
 
-    # Update with new oversized content
+    # Update with new oversized content (must exceed s3_threshold_bytes=102400)
     new_content = "\n\n".join(
-        [f"Updated paragraph {i}: " + "y" * 400 for i in range(15)]
+        [f"Updated paragraph {i}: " + "y" * 2000 for i in range(60)]
     )
     updated = await update_memory(
         original.id,
@@ -1705,8 +1706,9 @@ async def test_update_memory_non_chunk_branches_still_copied(async_session, embe
     assert old_rationale_count == 1
 
     # Update content (triggers rechunk + deep-copy of non-chunk branches)
+    # Must exceed s3_threshold_bytes=102400
     new_content = "\n\n".join(
-        [f"Revised paragraph {i}: " + "z" * 400 for i in range(15)]
+        [f"Revised paragraph {i}: " + "z" * 2000 for i in range(60)]
     )
     updated = await update_memory(
         parent.id,
@@ -1783,9 +1785,9 @@ async def test_update_memory_oversized_no_s3_retires_old_chunks(async_session, e
     assert len(old_chunks) >= 2
     old_chunk_ids = {c.id for c in old_chunks}
 
-    # Update with different oversized content
+    # Update with different oversized content (must exceed s3_threshold_bytes=102400)
     new_content = "\n\n".join(
-        [f"Updated paragraph {i}: " + "z" * 400 for i in range(15)]
+        [f"Updated paragraph {i}: " + "z" * 2000 for i in range(60)]
     )
     updated = await update_memory(
         original.id,
@@ -1875,4 +1877,85 @@ async def test_create_memory_passes_force(async_session, embedding_service, monk
     assert "force" in captured_kwargs, "force kwarg was not forwarded to run_curation_pipeline"
     assert captured_kwargs["force"] is True, (
         f"Expected force=True forwarded, got force={captured_kwargs.get('force')!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# #387 -- node_to_read() honesty flags (content_truncated / full_available)
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_node(**overrides):
+    """Build a minimal MemoryNode-like object for node_to_read tests.
+
+    Uses a SimpleNamespace instead of a real ORM instance to avoid needing
+    a database session. node_to_read only reads attributes, never queries.
+    """
+    from types import SimpleNamespace
+    from datetime import UTC, datetime
+
+    defaults = {
+        "id": uuid.uuid4(),
+        "parent_id": None,
+        "content": "test content",
+        "stub": "test stub",
+        "storage_type": "inline",
+        "content_ref": None,
+        "weight": 0.7,
+        "scope": "user",
+        "scope_id": None,
+        "branch_type": None,
+        "owner_id": "user-1",
+        "tenant_id": "default",
+        "domains": None,
+        "content_type": "experiential",
+        "content_hash": None,
+        "is_current": True,
+        "version": 1,
+        "previous_version_id": None,
+        "metadata_": None,
+        "created_at": datetime.now(tz=UTC),
+        "updated_at": datetime.now(tz=UTC),
+        "expires_at": None,
+        "relevant_until": None,
+        "actor_id": None,
+        "driver_id": None,
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+@pytest.mark.parametrize(
+    "storage_type, content_ref, expected_truncated, expected_available",
+    [
+        pytest.param(
+            "inline", None, False, False,
+            id="inline-memory",
+        ),
+        pytest.param(
+            "s3", "s3://memoryhub/abc123", True, True,
+            id="s3-backed-with-ref",
+        ),
+        pytest.param(
+            "s3", None, True, False,
+            id="s3-backed-without-ref",
+        ),
+    ],
+)
+def test_node_to_read_honesty_flags(
+    storage_type, content_ref, expected_truncated, expected_available,
+):
+    """node_to_read sets content_truncated and full_available based on
+    storage_type and content_ref presence (#387)."""
+    node = _make_mock_node(storage_type=storage_type, content_ref=content_ref)
+
+    result = node_to_read(node, has_children=False, has_rationale=False)
+
+    assert result.content_truncated is expected_truncated, (
+        f"storage_type={storage_type!r}, content_ref={content_ref!r}: "
+        f"expected content_truncated={expected_truncated}, got {result.content_truncated}"
+    )
+    assert result.full_available is expected_available, (
+        f"storage_type={storage_type!r}, content_ref={content_ref!r}: "
+        f"expected full_available={expected_available}, got {result.full_available}"
     )
