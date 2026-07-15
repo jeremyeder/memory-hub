@@ -14,6 +14,9 @@ Optional env vars:
                                   (reranker, focus, keyword, domain, graph)
     MEMORYHUB_FOCUS_MODE       -- "persona" to pass persona name as focus string,
                                   enabling 2-vector retrieval (default: off)
+    MEMORYHUB_RETURN_CHUNKS    -- "true" to return matched chunks directly
+                                  instead of expanding to parent memories
+    MEMORYHUB_K                -- retrieval depth, default 70
 
 Reset-only env vars (raw SQL DELETE for test scaffolding):
     MEMORYHUB_DB_HOST    -- default localhost
@@ -58,6 +61,7 @@ class MemoryHubProvider(MemoryProvider):
         self._disabled_signals: list[str] | None = None
         self._tenant_id: str | None = None
         self._focus_mode: str | None = None
+        self._return_chunks: bool = False
 
     def prepare(self, store_dir: Path, unit_ids: set[str] | None = None, reset: bool = True) -> None:
         self._url = os.environ.get("MEMORYHUB_URL")
@@ -85,6 +89,7 @@ class MemoryHubProvider(MemoryProvider):
         )
 
         self._focus_mode = os.environ.get("MEMORYHUB_FOCUS_MODE", "").strip().lower() or None
+        self._return_chunks = os.environ.get("MEMORYHUB_RETURN_CHUNKS", "").lower() in ("1", "true", "yes")
 
         self._doc_to_memory_id.clear()
         self._memory_to_doc_id.clear()
@@ -187,6 +192,8 @@ class MemoryHubProvider(MemoryProvider):
                 name = self._extract_persona_name(query)
                 if name:
                     search_kwargs["focus"] = name
+            if self._return_chunks:
+                search_kwargs["return_chunks"] = True
             results = await client.search(**search_kwargs)
 
         documents = []

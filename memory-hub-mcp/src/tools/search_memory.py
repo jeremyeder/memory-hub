@@ -645,6 +645,17 @@ async def search_memory(
             ),
         ),
     ] = None,
+    return_chunks: Annotated[
+        bool,
+        Field(
+            description=(
+                "(Advanced) When True, return matched chunks directly instead "
+                "of expanding them to their parent memories. Produces smaller, "
+                "more focused results. Use read_memory(hydrate=true) on the "
+                "parent_id if full context is needed. Default False."
+            ),
+        ),
+    ] = False,
     raw_results: Annotated[
         bool,
         Field(
@@ -922,6 +933,7 @@ async def search_memory(
                 content_type=content_type,
                 temporal_status=temporal_status,
                 disabled_signals=set(disabled_signals) if disabled_signals else None,
+                return_chunks=return_chunks,
             )
             graph_bundle = bundle
             results = bundle.results
@@ -957,6 +969,7 @@ async def search_memory(
                 temporal_status=temporal_status,
                 disabled_signals=set(disabled_signals) if disabled_signals else None,
                 reranker=reranker,
+                return_chunks=return_chunks,
             )
 
             # Pattern detection on the non-focus path: embed the query

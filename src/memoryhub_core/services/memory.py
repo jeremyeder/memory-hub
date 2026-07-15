@@ -964,6 +964,7 @@ async def search_memories(
     keyword_boost_weight: float = 0.15,
     disabled_signals: set[str] | None = None,
     reranker: RerankerService | None = None,
+    return_chunks: bool = False,
 ) -> list[tuple[MemoryNodeRead | MemoryNodeStub, float]]:
     """Search memories using pgvector cosine similarity with optional keyword recall.
 
@@ -977,6 +978,10 @@ async def search_memories(
     When a reranker is provided and not disabled, the top RERANK_POOL_SIZE
     candidates are re-scored by a cross-encoder before the RRF blend. This
     replaces cosine ranks with cross-encoder ranks for those candidates.
+
+    When return_chunks is True, chunk hits are returned directly instead
+    of being expanded to their parent memories. This produces smaller,
+    more focused results at the cost of losing surrounding context.
 
     Falls back to weight-based ordering with synthetic scores when pgvector
     is not available (e.g., SQLite in tests).
@@ -1129,7 +1134,8 @@ async def search_memories(
         )
         scored.append((node, score_q + score_k))
     scored.sort(key=lambda pair: pair[1], reverse=True)
-    scored = await _expand_chunks_to_parents(scored, session)
+    if not return_chunks:
+        scored = await _expand_chunks_to_parents(scored, session)
 
     top_nodes = scored[:max_results]
 
@@ -1330,6 +1336,7 @@ async def search_memories_with_focus(
     temporal_status: str | None = None,
     keyword_boost_weight: float = 0.15,
     disabled_signals: set[str] | None = None,
+    return_chunks: bool = False,
 ) -> FocusedSearchResult:
     """Two-vector retrieval with session focus bias.
 
@@ -1381,6 +1388,7 @@ async def search_memories_with_focus(
             temporal_status=temporal_status,
             disabled_signals=disabled_signals,
             reranker=reranker,
+            return_chunks=return_chunks,
         )
         return FocusedSearchResult(results=plain)
 
@@ -1654,7 +1662,8 @@ async def search_memories_with_focus(
         )
         blended_scores.append((node, score_q + score_f + score_d + score_g + score_k))
     blended_scores.sort(key=lambda pair: pair[1], reverse=True)
-    blended_scores = await _expand_chunks_to_parents(blended_scores, session)
+    if not return_chunks:
+        blended_scores = await _expand_chunks_to_parents(blended_scores, session)
 
     top_nodes = [node for node, _ in blended_scores[:max_results]]
     if not top_nodes:
