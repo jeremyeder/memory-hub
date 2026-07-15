@@ -146,7 +146,7 @@ class MemoryHubProvider(MemoryProvider):
             await engine.dispose()
 
     def retrieve(
-        self, query: str, k: int = 20, user_id: str | None = None,
+        self, query: str, k: int = 70, user_id: str | None = None,
         query_timestamp: str | None = None,
     ) -> tuple[list[Document], dict | None]:
         return asyncio.run(self._run_retrieve(query, k, user_id, query_timestamp))
@@ -164,6 +164,7 @@ class MemoryHubProvider(MemoryProvider):
                 project_id=self._project_id,
                 weight_threshold=0.0,
                 mode="full_only",
+                max_response_tokens=0,
                 disabled_signals=self._disabled_signals,
             )
             if self._tenant_id:
