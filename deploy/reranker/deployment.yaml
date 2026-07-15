@@ -19,7 +19,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: tei
-          image: ghcr.io/huggingface/text-embeddings-inference:1.6
+          image: ghcr.io/huggingface/text-embeddings-inference:1.9
           args:
             - --model-id
             - ibm-granite/granite-embedding-reranker-english-r2
