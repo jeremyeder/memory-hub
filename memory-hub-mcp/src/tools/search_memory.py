@@ -1238,15 +1238,12 @@ async def search_memory(
             response["compilation_epoch"] = compilation_meta["compilation_epoch"]
             response["appendix_count"] = compilation_meta["appendix_count"]
         if focus_meta is not None:
-            # Surface only the agent-facing pivot fields by default. The
-            # internal `used_reranker` and `fallback_reason` are useful
-            # for operator debugging but noisy for the agent surface;
-            # they are still exposed when the rerank fell back so an
-            # operator can grep response logs.
             response["pivot_suggested"] = focus_meta["pivot_suggested"]
             response["pivot_reason"] = focus_meta["pivot_reason"]
+            response["used_reranker"] = focus_meta.get("used_reranker", False)
+            response["keyword_matches"] = focus_meta.get("keyword_matches", 0)
             if focus_meta["fallback_reason"]:
-                response["focus_fallback_reason"] = focus_meta["fallback_reason"]
+                response["reranker_fallback_reason"] = focus_meta["fallback_reason"]
         if focus_meta is not None and focus_meta.get("disabled_signals"):
             response["disabled_signals"] = focus_meta["disabled_signals"]
         elif focus_meta is None and disabled_signals:

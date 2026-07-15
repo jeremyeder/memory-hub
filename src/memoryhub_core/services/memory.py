@@ -1110,7 +1110,7 @@ async def search_memories(
                 rank_cosine[node.id] = new_rank
             for idx in range(len(rerank_pool), len(candidate_nodes)):
                 rank_cosine[candidate_nodes[idx].id] = idx + 1
-            logger.debug("search_memories: reranker applied to %d candidates", len(rerank_pool))
+            logger.info("search_memories: reranker applied to %d candidates", len(rerank_pool))
         except Exception as exc:
             logger.warning("search_memories reranker fallback: %s", exc)
 
@@ -1154,6 +1154,17 @@ async def search_memories(
                 has_rationale=has_rationale,
                 content_type=node.content_type, created_at=node.created_at,
             ), rrf_score))
+    used_reranker = (
+        reranker is not None
+        and getattr(reranker, "is_configured", True)
+        and "reranker" not in _disabled
+    )
+    logger.info(
+        "search_memories trace: candidates=%d reranker=%s keyword_hits=%d "
+        "results=%d disabled=%s",
+        len(candidate_nodes), used_reranker, len(rank_keyword),
+        len(results), sorted(_disabled),
+    )
     return results
 
 
@@ -1502,6 +1513,7 @@ async def search_memories_with_focus(
             for idx in range(len(rerank_pool), len(candidate_nodes)):
                 rank_query[candidate_nodes[idx].id] = idx + 1
             used_reranker = True
+            logger.info("focused_search: reranker applied to %d candidates", len(rerank_pool))
         except Exception as exc:  # pragma: no cover - network error
             fallback_reason = (
                 f"reranker call failed ({type(exc).__name__}); "
@@ -1514,10 +1526,12 @@ async def search_memories_with_focus(
         fallback_reason = (
             "no reranker configured; using cosine rank for query stage"
         )
+        logger.info("focused_search: no reranker configured")
     else:
         fallback_reason = (
             "reranker not configured (is_configured=False); using cosine rank"
         )
+        logger.info("focused_search: reranker disabled (is_configured=False or in disabled_signals)")
 
     # Focus cosine ranks across the candidate pool. Distance from the
     # focus vector ascending = best focus match first.
@@ -1734,6 +1748,13 @@ async def search_memories_with_focus(
         except Exception:
             pass  # pattern detection is best-effort
 
+    logger.info(
+        "focused_search trace: candidates=%d reranker=%s keyword_hits=%d "
+        "focus=%s pivot=%.3f/%s results=%d disabled=%s",
+        len(candidate_nodes), used_reranker, len(rank_keyword),
+        bool(use_focus), pivot_distance or 0.0, pivot_suggested,
+        len(formatted), sorted(_disabled),
+    )
     return FocusedSearchResult(
         results=formatted,
         pivot_suggested=pivot_suggested,
