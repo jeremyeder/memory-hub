@@ -48,16 +48,32 @@ def classify_result(r: dict, cur) -> dict:
             else:
                 full += 1
 
-    # Look up user's memories in DB
+    # Look up user's memories in DB via owner_id (not content grep which
+    # crosses owner boundaries). The harness uses owner_id = "amb-{user_id}"
+    # where user_id is the context hash, not the persona name. We find the
+    # owner by matching the persona name in parent memory content, then count
+    # only that owner's parents.
     cur.execute("""
-        SELECT COUNT(*) FILTER (WHERE branch_type IS NULL) as parents,
-               COUNT(*) FILTER (WHERE branch_type = 'chunk') as chunks
+        SELECT owner_id, COUNT(*) as parent_count
         FROM memory_nodes
-        WHERE tenant_id = 'amb-benchmark' AND content LIKE %s
+        WHERE tenant_id = 'amb-benchmark'
         AND branch_type IS NULL
+        AND content LIKE %s
+        GROUP BY owner_id
+        ORDER BY parent_count DESC
+        LIMIT 1
     """, (f"%{user_name}%",))
-    db_row = cur.fetchone()
-    db_parents = db_row[0] if db_row else 0
+    owner_row = cur.fetchone()
+    if owner_row:
+        user_owner_id = owner_row[0]
+        cur.execute("""
+            SELECT COUNT(*) FROM memory_nodes
+            WHERE tenant_id = 'amb-benchmark' AND owner_id = %s
+            AND branch_type IS NULL
+        """, (user_owner_id,))
+        db_parents = cur.fetchone()[0]
+    else:
+        db_parents = 0
 
     # Classify
     if correct:
