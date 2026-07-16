@@ -17,6 +17,8 @@ Optional env vars:
     MEMORYHUB_RETURN_CHUNKS    -- "true" to return matched chunks directly
                                   instead of expanding to parent memories
     MEMORYHUB_K                -- retrieval depth, default 70
+    MEMORYHUB_CHUNK_TARGET_TOKENS  -- target tokens per chunk (default: server default, 256)
+    MEMORYHUB_CHUNK_OVERLAP_TOKENS -- overlap tokens between chunks (default: 0)
 
 Reset-only env vars (raw SQL DELETE for test scaffolding):
     MEMORYHUB_DB_HOST    -- default localhost
@@ -62,6 +64,8 @@ class MemoryHubProvider(MemoryProvider):
         self._tenant_id: str | None = None
         self._focus_mode: str | None = None
         self._return_chunks: bool = False
+        self._chunk_target_tokens: int | None = None
+        self._chunk_overlap_tokens: int | None = None
 
     def prepare(self, store_dir: Path, unit_ids: set[str] | None = None, reset: bool = True) -> None:
         self._url = os.environ.get("MEMORYHUB_URL")
@@ -90,6 +94,11 @@ class MemoryHubProvider(MemoryProvider):
 
         self._focus_mode = os.environ.get("MEMORYHUB_FOCUS_MODE", "").strip().lower() or None
         self._return_chunks = os.environ.get("MEMORYHUB_RETURN_CHUNKS", "").lower() in ("1", "true", "yes")
+
+        raw_chunk_target = os.environ.get("MEMORYHUB_CHUNK_TARGET_TOKENS", "").strip()
+        self._chunk_target_tokens = int(raw_chunk_target) if raw_chunk_target else None
+        raw_chunk_overlap = os.environ.get("MEMORYHUB_CHUNK_OVERLAP_TOKENS", "").strip()
+        self._chunk_overlap_tokens = int(raw_chunk_overlap) if raw_chunk_overlap else None
 
         self._doc_to_memory_id.clear()
         self._memory_to_doc_id.clear()
@@ -125,6 +134,10 @@ class MemoryHubProvider(MemoryProvider):
                 )
                 if self._tenant_id:
                     write_kwargs["tenant_id"] = self._tenant_id
+                if self._chunk_target_tokens is not None:
+                    write_kwargs["chunk_target_tokens"] = self._chunk_target_tokens
+                if self._chunk_overlap_tokens is not None:
+                    write_kwargs["chunk_overlap_tokens"] = self._chunk_overlap_tokens
                 result = await client.write(**write_kwargs)
 
                 if result.memory:
@@ -148,20 +161,36 @@ class MemoryHubProvider(MemoryProvider):
         try:
             async with session_factory() as session:
                 result = await session.execute(
-                    text("DELETE FROM memory_nodes WHERE owner_id LIKE 'amb-%'")
+                    text(
+                        "DELETE FROM memory_nodes "
+                        "WHERE owner_id LIKE 'amb-%' AND scope_id = :project_id"
+                    ),
+                    {"project_id": self._project_id},
                 )
                 await session.commit()
-                logger.info("Deleted %d AMB benchmark memories", result.rowcount)
+                logger.info(
+                    "Deleted %d AMB benchmark memories for project %s",
+                    result.rowcount, self._project_id,
+                )
         finally:
             await engine.dispose()
+
+    def _resolve_k(self, k: int | None) -> int:
+        if k is None or k == 10:
+            return int(os.environ.get("MEMORYHUB_K", "70"))
+        return k
 
     def retrieve(
         self, query: str, k: int | None = None, user_id: str | None = None,
         query_timestamp: str | None = None,
     ) -> tuple[list[Document], dict | None]:
-        if k is None:
-            k = int(os.environ.get("MEMORYHUB_K", "70"))
-        return asyncio.run(self._run_retrieve(query, k, user_id, query_timestamp))
+        return asyncio.run(self._run_retrieve(query, self._resolve_k(k), user_id, query_timestamp))
+
+    async def async_retrieve(
+        self, query: str, k: int = 10, user_id: str | None = None,
+        query_timestamp: str | None = None,
+    ) -> tuple[list[Document], dict | None]:
+        return await asyncio.to_thread(self.retrieve, query, self._resolve_k(k), user_id, query_timestamp)
 
     @staticmethod
     def _extract_persona_name(query: str) -> str | None:
